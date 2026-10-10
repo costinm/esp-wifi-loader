@@ -5,6 +5,8 @@
 #   <cpu>-request-loader.wlpkg  zero-length Main manifest: a running Main reboots into the loader
 #   <cpu>-loader.wlpkg      loader, target loader (taken by the bootstrap build)
 #   <cpu>-stage2-4mb.wlpkg  Stage2 (and -8mb), target stage2 (taken by the bootstrap build)
+#   <cpu>-dmesh.wlpkg       only with DMESH_FLASH_DIR=/ws/dmesh/target/flash: DMesh Main (<dir>/<cpu>/main-app.bin);
+#                           select it in the app with `--es bundled dmesh`
 #
 #   scripts/pack-android-assets.sh [KEY.pem]     # default target/dev-key.pem (created if missing)
 # VERSION overrides the monotonic version (default yymmddHHMM). Release builds must pass a
@@ -21,6 +23,9 @@ for dir in "$ROOT"/target/out/*/; do
     cpu="$(basename "$dir")"
     [[ -f "$dir/loader.bin" ]] || continue
     $SIGN sign --key "$KEY" --cpu "$cpu" --version "$VERSION" --target main   --image "$dir/bootstrap.bin" --out "$OUT/$cpu-main.wlpkg"
+    if [[ -n "${DMESH_FLASH_DIR:-}" && -f "$DMESH_FLASH_DIR/$cpu/main-app.bin" ]]; then
+        $SIGN sign --key "$KEY" --cpu "$cpu" --version "$VERSION" --target main --image "$DMESH_FLASH_DIR/$cpu/main-app.bin" --out "$OUT/$cpu-dmesh.wlpkg"
+    fi
     $SIGN sign --key "$KEY" --cpu "$cpu" --version "$VERSION" --request-loader --out "$OUT/$cpu-request-loader.wlpkg"
     $SIGN sign --key "$KEY" --cpu "$cpu" --version "$VERSION" --target loader --image "$dir/loader.bin"    --out "$OUT/$cpu-loader.wlpkg"
     for size in 4mb 8mb; do
