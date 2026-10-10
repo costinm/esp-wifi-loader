@@ -65,6 +65,8 @@ pub const BAD_TABLE: Reject = Reject::new(12, "bad-block-table");
 pub const BAD_BLOCK: Reject = Reject::new(13, "bad-block");
 pub const BAD_IMAGE_HASH: Reject = Reject::new(14, "bad-image-hash");
 pub const EXPECTED_FIN: Reject = Reject::new(6, "expected-fin");
+pub const STATE_WRITE: Reject = Reject::new(5, "state-write");
+pub const NO_PINNED_KEY: Reject = Reject::new(8, "no-pinned-key");
 
 /// The 16-byte header that starts every connection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -145,7 +145,6 @@ bool wl_net_join_flash(void)
 bool wl_net_host_rescue(void)
 {
     esp_wifi_disconnect();
-    role = WL_ROLE_AP;
     ip6_ready = false;
     wifi_config_t cfg = {0};
     strlcpy((char *)cfg.ap.ssid, CONFIG_WL_RESCUE_SSID, sizeof(cfg.ap.ssid));
@@ -156,6 +155,7 @@ bool wl_net_host_rescue(void)
     cfg.ap.max_connection = 4;
     if (esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK ||
         esp_wifi_set_config(WIFI_IF_AP, &cfg) != ESP_OK) return false;
+    role = WL_ROLE_AP;
     ap_active = true;
     for (int i = 0; i < 50 && !ip6_ready; ++i) vTaskDelay(pdMS_TO_TICKS(100));
     return ip6_ready;
@@ -171,5 +171,6 @@ unsigned wl_net_ifindex(void)
 
 void wl_net_mac(uint8_t mac[6])
 {
-    esp_wifi_get_mac(WIFI_IF_STA, mac);
+    /* The address of the interface the announce is sent on, which the flasher sees. */
+    esp_wifi_get_mac(role == WL_ROLE_AP ? WIFI_IF_AP : WIFI_IF_STA, mac);
 }

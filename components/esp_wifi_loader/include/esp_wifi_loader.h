@@ -25,7 +25,11 @@ esp_err_t esp_wifi_loader_init(void);
  * package, or answer a zero-length Main manifest. The caller owns and closes `fd` and
  * should set receive/send timeouts (about 10 s) on it. Returns after the reply was
  * sent; in the loader and bootstrap builds a finished install restarts the chip, and a
- * zero-length manifest restarts it into the loader, from inside this call. */
+ * zero-length manifest restarts it into the loader, from inside this call.
+ *
+ * Not reentrant: the upload buffers are static, so serve one connection at a time. In library mode
+ * (an application with its own network) there is no trust on first use and no unsigned reboot request:
+ * a key must already be pinned in the state log or every upload is refused. */
 esp_wifi_loader_result_t esp_wifi_loader_serve(int fd);
 
 /* Run the loader (loader and bootstrap builds only): join the flasher network or host ESP-RESCUE, announce, accept signed

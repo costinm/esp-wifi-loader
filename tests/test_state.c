@@ -7,9 +7,10 @@
 static uint8_t flash[WL_STATE_SIZE];
 static int fail_after = -1; /* writes remaining before simulated power loss */
 
-static int f_read(void *c, uint32_t o, void *b, size_t n) { memcpy(b, flash + o, n); return 0; }
+static int f_read(void *c, uint32_t o, void *b, size_t n) { (void)c; memcpy(b, flash + o, n); return 0; }
 static int f_write(void *c, uint32_t o, const void *b, size_t n)
 {
+    (void)c;
     assert(o % 4 == 0 && n % 4 == 0);
     if (fail_after == 0) { /* torn: program half the words */
         for (size_t i = 0; i < n / 2; ++i) flash[o + i] &= ((const uint8_t *)b)[i];
@@ -19,7 +20,7 @@ static int f_write(void *c, uint32_t o, const void *b, size_t n)
     for (size_t i = 0; i < n; ++i) flash[o + i] &= ((const uint8_t *)b)[i]; /* NOR: 1->0 only */
     return 0;
 }
-static int f_erase(void *c, uint32_t o) { memset(flash + o, 0xff, WL_STATE_SECTOR); return 0; }
+static int f_erase(void *c, uint32_t o) { (void)c; (void)o; memset(flash + o, 0xff, WL_STATE_SECTOR); return 0; }
 static const wl_flash_ops_t ops = {NULL, f_read, f_write, f_erase};
 
 int main(void)
@@ -73,6 +74,40 @@ int main(void)
         assert(!wl_state_append(&st, WL_REC_MINVER, &nv, 4)); /* heals if dirty */
         wl_state_open(&st, &ops);
         assert(st.view.minver == nv);
+    }
+    /* Module slots (written by the Rust crate) survive; power cut at every write of a COMPACTING append. */
+    {
+        uint8_t rec[5] = {2, 9, 0, 0, 0};
+        assert(!wl_state_append(&st, WL_REC_MINVER_MODULE, rec, 5));
+        wl_state_open(&st, &ops);
+        assert((st.view.has_module & 4) && st.view.minver_module[2] == 9);
+        for (int cut = 0; cut < 14; ++cut) {
+            wl_state_open(&st, &ops);
+            /* fill the active sector until the next record no longer fits */
+            uint8_t filler[WL_HEADER_SIZE];
+            memset(filler, 0x5a, sizeof(filler));
+            for (int i = 0; i < 40; ++i) {
+                uint32_t used_before = st.used;
+                assert(!wl_state_append(&st, WL_REC_HEADER, filler, sizeof(filler)));
+                if (st.used < used_before) break; /* it compacted */
+            }
+            while (st.used + 4 + WL_HEADER_SIZE + 4 <= WL_STATE_SECTOR) {
+                assert(!wl_state_append(&st, WL_REC_HEADER, filler, sizeof(filler)));
+            }
+            uint32_t old = st.view.minver, nv = old + 1;
+            uint8_t before_pin = st.view.has_pin;
+            memset(filler, 0x6b, sizeof(filler));
+            fail_after = cut;
+            (void)wl_state_append(&st, WL_REC_HEADER, filler, sizeof(filler)); /* compacts */
+            fail_after = -1;
+            wl_state_open(&st, &ops);
+            assert(st.view.has_pin == before_pin && st.view.has_pin);
+            assert(st.view.minver == old && (st.view.has_module & 4) && st.view.minver_module[2] == 9);
+            assert(st.view.qio == WL_QIO_OK);
+            assert(!wl_state_append(&st, WL_REC_MINVER, &nv, 4)); /* heals a torn sector */
+            wl_state_open(&st, &ops);
+            assert(st.view.minver == nv);
+        }
     }
     wl_state_erase_all(&st);
     wl_state_open(&st, &ops);

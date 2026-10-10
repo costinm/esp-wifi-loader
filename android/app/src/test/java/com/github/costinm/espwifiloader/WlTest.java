@@ -149,4 +149,18 @@ public class WlTest {
         assertNull(p.refusal(Announce.parse("esp-wifi-loader mode=bootstrap chip=esp32c6 mac=m")));
         assertNotNull(p.refusal(Announce.parse("esp-wifi-loader mode=loader chip=esp32c6 mac=m")));
     }
+
+    @Test
+    public void uploadIsNotDoneUntilTheDeviceAnnouncesAfterItsRestart() throws Exception {
+        Flasher f = new Flasher(x -> { });
+        java.net.InetAddress addr = java.net.InetAddress.getLoopbackAddress();
+        Announce loader = Announce.parse(LINE);
+        f.onAnnounce(loader, addr);
+        f.setStatus(loader.mac(), Flasher.UPLOADED + " main - waiting for the restart");
+        f.onAnnounce(loader, addr); // the loader's own repeat before it restarts proves nothing
+        assertTrue(f.devices().iterator().next().status.startsWith("uploaded"));
+        // now something else announces: the application is running
+        f.onAnnounce(Announce.parse(LINE.replace("mode=loader", "mode=bootstrap").replace("state=blank", "state=update")), addr);
+        assertTrue(f.devices().iterator().next().status, f.devices().iterator().next().status.startsWith("running after upload"));
+    }
 }

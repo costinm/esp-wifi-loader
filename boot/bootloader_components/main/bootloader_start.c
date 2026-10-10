@@ -16,11 +16,7 @@
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "esp_rom_gpio.h"
-#if CONFIG_IDF_TARGET_ESP32C6
 #include "soc/rtc.h"
-#else
-#include "soc/rtc_cntl_reg.h"
-#endif
 #include "soc/soc.h"
 #include "soc/soc_caps.h"
 #if CONFIG_IDF_TARGET_ESP32
@@ -57,18 +53,14 @@
 #define BOOT_TARGET_MAIN 1u
 #define BOOT_TARGET_LOADER 2u
 
-/* A trial passes when Main ran at least this long before the next reset. */
-#define TRIAL_PASS_TICKS CONFIG_WL_BOOT_QUICK_WINDOW_TICKS
 
 static const char *TAG = "wl-boot";
 
+/* rtc_time_get() latches the counter first. Reading RTC_CNTL_TIME0_REG directly returns a stale value
+ * on the ESP32 and ESP32-S3, where it only refreshes after a write to RTC_CNTL_TIME_UPDATE. */
 static uint32_t rtc_boot_ticks(void)
 {
-#if CONFIG_IDF_TARGET_ESP32C6
     return (uint32_t)rtc_time_get();
-#else
-    return REG_READ(RTC_CNTL_TIME0_REG);
-#endif
 }
 
 /* Lives in the custom RTC area (32 bytes). Offsets 5..7 are the shared bytes
@@ -232,9 +224,16 @@ static bool button_pressed(void)
 
 /* ---- QIO autodetect ---- */
 
-/* Evaluate a pending trial: it passes when the next reset came after the
- * stable period. QIO failed -> retry the same Main once in DIO; DIO stable ->
- * permanent DIO verdict; DIO also unstable -> Main is at fault, record nothing. */
+/* Evaluate a pending trial on the next reset.
+ *  - A watchdog or brown-out reset fails it whenever it comes: a Main that hangs in QIO and is reset by the
+ *    watchdog after a few seconds must not be recorded as "QIO ok".
+ *  - A reset after CONFIG_WL_BOOT_TRIAL_PASS_TICKS (about 30 s) passes it.
+ *  - A reset inside the quick-reset window fails it (a crash loop).
+ *  - Anything in between (a person pressing reset) proves nothing: the trial is simply dropped and starts
+ *    again on the next boot.
+ * QIO failed: retry the same Main once in DIO. DIO stable: permanent "DIO only" record. DIO also unstable:
+ * Main is at fault, nothing is recorded. A panic restarts through a software reset, so it only counts as a
+ * failure while it happens inside the quick-reset window. */
 static void account_trial(boot_state_t *s, wl_state_t *st, int reset, uint32_t now)
 {
     uint8_t flash = s->flash & (WL_FLASH_QIO_TRIAL | WL_FLASH_DIO_TRIAL);
@@ -242,21 +241,22 @@ static void account_trial(boot_state_t *s, wl_state_t *st, int reset, uint32_t n
     if (!flash || reset == RESET_REASON_CHIP_POWER_ON || reset == RESET_REASON_CORE_DEEP_SLEEP) {
         return;
     }
-    bool stable = now - s->trial_start >= TRIAL_PASS_TICKS;
-    uint8_t verdict;
-    if (flash & WL_FLASH_QIO_TRIAL) {
-        if (!stable) {
-            s->flash = WL_FLASH_DIO_TRIAL;
-            return;
-        }
-        verdict = WL_QIO_OK;
-    } else {
-        s->flash = 0;
-        if (!stable) return;
-        verdict = WL_QIO_DIO_ONLY;
+    uint32_t elapsed = now - s->trial_start;
+    bool pass = false, fail = false;
+    if (reset_is_abnormal(reset)) {
+        fail = true;
+    } else if (elapsed >= CONFIG_WL_BOOT_TRIAL_PASS_TICKS) {
+        pass = true;
+    } else if (elapsed < CONFIG_WL_BOOT_QUICK_WINDOW_TICKS) {
+        fail = true;
     }
+    bool qio = flash & WL_FLASH_QIO_TRIAL;
     s->flash = 0;
-    if (st->view.qio == 0) {
+    if (qio && fail) {
+        s->flash = WL_FLASH_DIO_TRIAL;
+        s->trial_start = now; /* the DIO trial is timed from this boot, not from the failed QIO one */
+    } else if (pass && st->view.qio == 0) {
+        uint8_t verdict = qio ? WL_QIO_OK : WL_QIO_DIO_ONLY;
         wl_state_append(st, WL_REC_QIO, &verdict, 1);
     }
 }

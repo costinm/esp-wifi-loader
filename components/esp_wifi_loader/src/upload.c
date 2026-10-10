@@ -115,6 +115,11 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
     if ((t[5] & ~2) || t[7] || (t[6] != 0 && t[6] != 255)) goto fail;
     dry = t[5] & 2;
     if (t[6] == 255) { /* reboot request: expects the client FIN */
+#if CONFIG_WL_MODE_LIBRARY
+        /* Unsigned: inside an application on someone's network this would let anyone restart it. */
+        code = 2; reason = "unsupported-header";
+        goto fail;
+#endif
         code = 6; reason = "expected-fin";
         if (recv(fd, body, 1, 0) != 0) goto fail;
         return send_all(fd, "OK 0\n") ? WL_UPLOAD_REBOOT : WL_UPLOAD_NONE;
@@ -129,6 +134,12 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
     const wl_state_view_t *v = &ctx->state->view;
     code = 8; reason = "key-mismatch";
     if (v->has_pin && memcmp(v->pin, pub, sizeof(pub))) goto fail;
+#if CONFIG_WL_MODE_LIBRARY
+    /* No trust on first use inside an application: the first sender on its network would pin their own
+     * key. The key has to be pinned already (by the loader's first install, or provisioned). */
+    reason = "no-pinned-key";
+    if (!v->has_pin) goto fail;
+#endif
     code = 9; reason = "rollback";
     {
         bool has = hdr.target == WL_TARGET_MAIN ? v->has_minver
@@ -241,23 +252,22 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
     if (recv(fd, body, 1, 0) != 0) goto fail;
 
     if (!dry) {
-        /* Commit: head sector last, then the state records. */
+        /* State first, head sector last: if the key or the minimum version cannot be saved the install
+         * fails before the image can boot, instead of leaving a bootable image whose trust or rollback
+         * state was lost. (A failed head write after this leaves a raised minimum version, which a
+         * reinstall of the same version satisfies.) */
+        code = 5; reason = "state-write";
+        uint32_t ver = hdr.version;
+        if (!ctx->state->view.has_pin && wl_state_append(ctx->state, WL_REC_PIN, pub, sizeof(pub))) goto fail;
+        uint8_t rec = hdr.target == WL_TARGET_MAIN ? WL_REC_MINVER
+                    : hdr.target == WL_TARGET_LOADER ? WL_REC_MINVER_LOADER : WL_REC_MINVER_STAGE2;
+        if (wl_state_append(ctx->state, rec, &ver, sizeof(ver))) goto fail;
+        if (hdr.target == WL_TARGET_MAIN && wl_state_append(ctx->state, WL_REC_HEADER, &hdr, sizeof(hdr))) goto fail;
         int64_t tm = now_ms();
         code = 5; reason = "head-commit";
         if (fl_write(&region, 0, head, SECTOR) != ESP_OK) goto fail;
         write_ms += now_ms() - tm;
-        bool first = !ctx->state->view.has_pin;
-        uint32_t ver = hdr.version;
-        if (first) wl_state_append(ctx->state, WL_REC_PIN, pub, sizeof(pub));
-        if (hdr.target == WL_TARGET_MAIN) {
-            ctx->main_present = true;
-            wl_state_append(ctx->state, WL_REC_MINVER, &ver, sizeof(ver));
-            wl_state_append(ctx->state, WL_REC_HEADER, &hdr, sizeof(hdr));
-        } else {
-            wl_state_append(ctx->state, hdr.target == WL_TARGET_LOADER ? WL_REC_MINVER_LOADER
-                                                                       : WL_REC_MINVER_STAGE2,
-                            &ver, sizeof(ver));
-        }
+        if (hdr.target == WL_TARGET_MAIN) ctx->main_present = true;
     }
     snprintf(line, sizeof(line), "OK %lu ms=%lld erase_ms=%lld write_ms=%lld%s\n",
              (unsigned long)hdr.image_size, (long long)(now_ms() - start), (long long)erase_ms,

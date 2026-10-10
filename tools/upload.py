@@ -56,7 +56,10 @@ def discover(iface, seconds, port=PORT):
 def _read_status(sock):
     buf = b""
     while True:
-        chunk = sock.recv(256)
+        try:
+            chunk = sock.recv(256)
+        except socket.timeout:
+            return "ERR no-reply"
         if not chunk:
             break
         buf += chunk

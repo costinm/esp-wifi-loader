@@ -42,6 +42,12 @@ static void apply(wl_state_view_t *v, uint8_t type, const uint8_t *d, uint8_t le
     case WL_REC_MINVER_STAGE2:
         if (len == 4) { memcpy(&v->minver_stage2, d, 4); v->has_minver_stage2 = true; }
         break;
+    case WL_REC_MINVER_MODULE:
+        if (len == 5 && d[0] < WL_MODULE_SLOTS) {
+            memcpy(&v->minver_module[d[0]], d + 1, 4);
+            v->has_module |= (uint8_t)(1u << d[0]);
+        }
+        break;
     case WL_REC_HEADER:
         if (len == WL_HEADER_SIZE) { memcpy(v->header, d, len); v->has_header = true; }
         break;
@@ -134,6 +140,14 @@ static int compact(wl_state_t *st)
         if (!recs[i].has) continue;
         if (write_record(st, base + off, recs[i].type, recs[i].d, recs[i].len)) return -1;
         off += 4 + padded(recs[i].len);
+    }
+    /* Module slots (written by the Rust crate) must survive a compaction done by the C code. */
+    for (uint8_t slot = 0; slot < WL_MODULE_SLOTS; ++slot) {
+        if (!(v->has_module & (1u << slot))) continue;
+        uint8_t rec[5] = {slot};
+        memcpy(rec + 1, &v->minver_module[slot], 4);
+        if (write_record(st, base + off, WL_REC_MINVER_MODULE, rec, sizeof(rec))) return -1;
+        off += 4 + padded(sizeof(rec));
     }
     uint32_t mark = ACTIVE_MARK;
     if (st->ops.write(st->ops.ctx, base + 8, &mark, 4)) return -1;

@@ -112,6 +112,11 @@ public final class Hotspot {
      * The name has to be DIRECT-xy-..., and the group is asked to use 2.4 GHz.
      */
     public void startP2pGroup() {
+        startP2pGroup(flashSsid);
+    }
+
+    /** A group with another name, e.g. DIRECT-ef-dmesh, the one DMesh's Main joins by itself. */
+    public void startP2pGroup(String name) {
         hostFailedAt = 0;
         try {
             if (p2p == null) {
@@ -121,15 +126,15 @@ public final class Hotspot {
             if (p2p == null || p2pChannel == null) throw new IllegalStateException("no Wi-Fi P2P");
             state = "starting";
             WifiP2pConfig cfg = new WifiP2pConfig.Builder()
-                    .setNetworkName(flashSsid)
+                    .setNetworkName(name)
                     .setPassphrase(PASSPHRASE)
                     .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_2GHZ)
                     .enablePersistentMode(false)
                     .build();
             // A group left from an earlier run would make createGroup fail with BUSY.
             p2p.removeGroup(p2pChannel, new WifiP2pManager.ActionListener() {
-                @Override public void onSuccess() { createGroup(cfg); }
-                @Override public void onFailure(int reason) { createGroup(cfg); }
+                @Override public void onSuccess() { createGroup(cfg, name); }
+                @Override public void onFailure(int reason) { createGroup(cfg, name); }
             });
         } catch (RuntimeException e) {
             hostFailedAt = System.currentTimeMillis();
@@ -138,14 +143,14 @@ public final class Hotspot {
         }
     }
 
-    private void createGroup(WifiP2pConfig cfg) {
+    private void createGroup(WifiP2pConfig cfg, String name) {
         try {
             p2p.createGroup(p2pChannel, cfg, new WifiP2pManager.ActionListener() {
                 @Override public void onSuccess() {
                     p2pGroup = true;
                     lock.acquire();
-                    state = "hosting " + flashSsid + " (P2P group)";
-                    log.accept("P2P group started: " + flashSsid);
+                    state = "hosting " + name + " (P2P group)";
+                    log.accept("P2P group started: " + name);
                     p2p.requestGroupInfo(p2pChannel, g -> {
                         if (g != null) log.accept("P2P group " + g.getNetworkName() + " owner=" + g.isGroupOwner()
                                 + " iface=" + g.getInterface());

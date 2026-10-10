@@ -33,6 +33,9 @@ for cpu in $CPUS; do
     rm -f "$out/bootstrap.sdkconfig"
     IDF_TARGET=$cpu idf.py -C "$ROOT/bootstrap" -B "$out/bootstrap-build" \
         -D SDKCONFIG="$out/bootstrap.sdkconfig" -D SDKCONFIG_DEFAULTS="$bdef" build
+    # Main is the image Stage2 trials in QIO; its own mode must stay DIO (the fallback of that trial)
+    grep -qxF 'CONFIG_ESPTOOLPY_FLASHMODE_DIO=y' "$out/bootstrap.sdkconfig" ||
+        { echo "$cpu bootstrap: flash driver must be DIO" >&2; exit 1; }
     cp "$out/bootstrap-build/esp-wifi-bootstrap.bin" "$out/bootstrap.bin"
 
     for size in $SIZES; do
@@ -50,7 +53,6 @@ for cpu in $CPUS; do
         cp "$out/stage2-$size-build/partition_table/partition-table.bin" "$out/partition-table-$size.bin"
         # One image for a blank board: stage2 + table + loader merged at offset 0.
         boot_off=0x0; [[ $cpu == esp32 ]] && boot_off=0x1000
-        [[ $cpu == esp32s3 || $cpu == esp32c6 ]] && boot_off=0x0
         python -m esptool --chip "$cpu" merge-bin -o "$out/factory-$size.bin" \
             --flash_mode dio --flash_size "${size^^}" \
             "$boot_off" "$out/stage2-$size.bin" 0x8000 "$out/partition-table-$size.bin" \

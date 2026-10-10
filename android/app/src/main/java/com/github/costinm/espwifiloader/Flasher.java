@@ -75,10 +75,31 @@ public final class Flasher {
             log.accept("device " + a.mac() + " " + a.chip() + " mode=" + a.mode() + " state=" + a.state()
                     + " via " + a.role());
         }
-        devices.put(a.mac(), new DeviceInfo(a, addr, System.currentTimeMillis(), old == null ? "" : old.status));
+        long now = System.currentTimeMillis();
+        String status = old == null ? "" : old.status;
+        if (status.startsWith(UPLOADED) && rebooted(old, a, now)) {
+            // Fresh announce from the device after the upload: report what is running now.
+            String target = status.substring(UPLOADED.length()).trim();
+            boolean loaderAgain = a.mode().equals("loader") && target.startsWith("main");
+            status = loaderAgain ? "uploaded, but back in the loader (state=" + a.state() + ")"
+                    : "running after upload: mode=" + a.mode() + " state=" + a.state() + " v=" + a.version();
+            log.accept(a.mac() + ": " + status);
+        }
+        devices.put(a.mac(), new DeviceInfo(a, addr, now, status));
     }
 
-    private void setStatus(String mac, String status) {
+    /** Status while the device has been sent an image but has not yet been seen running it. */
+    static final String UPLOADED = "uploaded";
+    /** The announce period of the loader is 5 s; a silence longer than this means it restarted. */
+    private static final long RESTART_GAP_MS = 7_500;
+
+    private static boolean rebooted(DeviceInfo old, Announce a, long now) {
+        if (now - old.seen > RESTART_GAP_MS) return true;
+        Announce o = old.announce;
+        return !o.mode().equals(a.mode()) || !o.state().equals(a.state()) || o.version() != a.version();
+    }
+
+    void setStatus(String mac, String status) {
         devices.computeIfPresent(mac, (k, d) -> new DeviceInfo(d.announce, d.addr, d.seen, status));
     }
 
@@ -122,7 +143,11 @@ public final class Flasher {
                             if (line.startsWith("P ")) setStatus(mac, "uploading " + line.split(" ")[1] + " B");
                         });
                 log.accept(mac + ": " + r.line);
-                setStatus(mac, r.ok ? "done" : "failed: " + r.line);
+                // The OK line only answers the upload. Whether the new image boots and stays up is known
+                // when the device announces again after its restart (onAnnounce); a dry run changes nothing.
+                setStatus(mac, !r.ok ? "failed: " + r.line : dry ? "dry run ok"
+                        : UPLOADED + " " + (pkg.header.target == Wl.TARGET_MAIN ? "main" : "image")
+                        + " - waiting for the restart");
             } catch (Exception e) {
                 log.accept(mac + ": " + e.getMessage());
                 setStatus(mac, "failed: " + e.getMessage());

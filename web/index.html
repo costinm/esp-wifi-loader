@@ -13,7 +13,7 @@
 </head>
 <body>
 <h1>esp-wifi-loader</h1>
-<p>Installs a small Wi-Fi loader on a blank ESP32 board. The loader then receives your
+<p>Installs a small Wi-Fi loader on a blank ESP32, ESP32-S3 or ESP32-C6 board. The loader then receives your
 signed application over Wi-Fi: no USB cable needed after this step.</p>
 <h2>ESP Web Tools</h2>
 <p>Chrome or Edge, board connected over USB. 4 MB and 8 MB flash have different partition tables.</p>
@@ -37,9 +37,21 @@ signed application over Wi-Fi: no USB cable needed after this step.</p>
     encodeURIComponent(new URL("launchpad.toml", location.href).href);
 </script>
 <h2>After flashing</h2>
-<p>A fresh board has no application, so it starts the loader. The loader joins the open
-<code>DIRECT-xy-flash</code> network if a flasher hosts it, otherwise it hosts <code>ESP-RESCUE</code>
-and announces <code>state=blank</code>.</p>
+<p>A fresh board has no application yet, so it starts the loader and waits for a flasher. Use the
+Android app (Android 13 or newer; see the project page for the download):</p>
+<ol>
+  <li>Tick <b>Rescuer</b> while the phone is charging, or tap <b>Host flash network</b>. The phone
+      creates a Wi-Fi Direct network named <code>DIRECT-ef-flash</code> and the board joins it within
+      about 15 seconds.</li>
+  <li>If your phone cannot host it, tap <b>Join ESP-RESCUE</b> instead: with no flash network around, the
+      board hosts <code>ESP-RESCUE</code> itself, and Android asks you once to confirm joining.</li>
+  <li>The board appears in the list. Tap it: the app takes the image from a file you pick, from the
+      domain the board reports, or, for a brand-new board, from the domain you type in, checks its
+      signature and installs it.</li>
+</ol>
+<p>Both networks use WPA2 with the public passphrase <code>untrusted-open-mode</code>: the board never
+needs your home Wi-Fi, and what it installs is protected by the image signature, not by the network.
+The loader stays on the board, so later upgrades need no cable.</p>
 <p class="muted"><a href="https://github.com/costinm/esp-wifi-loader">github.com/costinm/esp-wifi-loader</a></p>
 </body>
 </html>

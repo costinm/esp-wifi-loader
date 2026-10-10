@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use sha2::{Digest, Sha256};
 
-use crate::state::{FlashOps, StateLog, REC_MINVER, REC_MINVER_LOADER, REC_MINVER_STAGE2, REC_PIN};
+use crate::state::{FlashOps, StateLog, REC_MINVER_LOADER, REC_MINVER_STAGE2, REC_PIN};
 use crate::wire::{self, target, Header, Reject, Transport, BLOCK, HEADER_SIZE, PUBKEY_SIZE, SIG_SIZE, TABLE_ENTRY};
 
 /// Where one image goes.
@@ -36,6 +36,9 @@ pub trait Platform {
     /// MODULE (then `name` is the module name); refuse with a [`Reject`] if this device does not take
     /// it, the name is unknown, or `image_size` does not fit. With `dry` nothing will be written.
     fn open(&mut self, target: u8, name: &[u8], image_size: u32, dry: bool) -> Result<Self::Sink, Reject>;
+    /// The slot number (0..[`crate::state::MODULE_SLOTS`]) of a module name, under which its minimum
+    /// version is kept; None for an unknown name.
+    fn module_slot(&self, name: &[u8]) -> Option<u8>;
 }
 
 /// What the caller does after [`Device::serve`] returned and the connection is closed.
@@ -48,13 +51,12 @@ pub enum Outcome {
     /// A zero-length Main manifest was accepted: set the RTC handoff to [`crate::rtc::HANDOFF_LOADER`]
     /// and restart (the reply was already sent; let it drain first).
     RequestLoader,
-    /// A plain reboot request: restart.
-    Reboot,
 }
 
 pub struct Device<P: Platform, F: FlashOps> {
     pub platform: P,
     pub state: StateLog<F>,
+    require_pin: bool,
 }
 
 fn read_exact<S: Read>(s: &mut S, buf: &mut [u8]) -> Result<(), Reject> {
@@ -72,7 +74,15 @@ fn expect_fin<S: Read>(s: &mut S) -> Result<(), Reject> {
 
 impl<P: Platform, F: FlashOps> Device<P, F> {
     pub fn new(platform: P, flash: F) -> Self {
-        Device { platform, state: StateLog::open(flash) }
+        Device { platform, state: StateLog::open(flash), require_pin: false }
+    }
+
+    /// Refuse every upload until a key has been pinned (by the loader, or provisioned). A firmware that
+    /// serves this protocol on a network it does not control should set this: otherwise the first sender
+    /// pins their own key (trust on first use) and can rewrite the loader and Stage2.
+    pub fn require_pinned_key(mut self) -> Self {
+        self.require_pin = true;
+        self
     }
 
     /// Serve one connection. Writes the reply lines (`P`, `OK`, `ERR`) to the stream.
@@ -86,12 +96,13 @@ impl<P: Platform, F: FlashOps> Device<P, F> {
         }
     }
 
-    fn min_version(&self, target: u8) -> Option<u32> {
+    fn min_version(&self, target: u8, slot: Option<u8>) -> Option<u32> {
         match target {
             target::MAIN => self.state.view.minver,
             target::LOADER => self.state.view.minver_loader,
             target::STAGE2 => self.state.view.minver_stage2,
-            _ => None, // modules have no rollback check
+            target::MODULE => slot.and_then(|s| self.state.view.minver_module[s as usize]),
+            _ => None,
         }
     }
 
@@ -101,9 +112,10 @@ impl<P: Platform, F: FlashOps> Device<P, F> {
         read_exact(s, &mut t)?;
         let transport = Transport::parse(&t)?;
         if transport.reboot {
-            expect_fin(s)?;
-            s.write_all(b"OK 0\n").map_err(|_| wire::SHORT_READ)?;
-            return Ok(Outcome::Reboot);
+            // An unsigned restart request: acceptable in the loader (its own network), not here, where
+            // anyone who can reach the port could restart the application. A signed zero-length Main
+            // package (below) is the way to ask for a restart into the loader.
+            return Err(wire::UNSUPPORTED);
         }
         let mut pubkey = [0u8; PUBKEY_SIZE];
         let mut sig = [0u8; SIG_SIZE];
@@ -120,7 +132,14 @@ impl<P: Platform, F: FlashOps> Device<P, F> {
         if self.state.view.pin.is_some_and(|pin| pin != pubkey) {
             return Err(wire::KEY_MISMATCH);
         }
-        if self.min_version(h.target).is_some_and(|min| h.version < min) {
+        if self.require_pin && self.state.view.pin.is_none() {
+            return Err(wire::NO_PINNED_KEY);
+        }
+        let slot = if h.target == target::MODULE { self.platform.module_slot(h.name()) } else { None };
+        if h.target == target::MODULE && slot.is_none() {
+            return Err(wire::WRONG_TARGET);
+        }
+        if self.min_version(h.target, slot).is_some_and(|min| h.version < min) {
             return Err(wire::ROLLBACK);
         }
         if h.format != wire::FORMAT || h.cpu != self.platform.cpu() {
@@ -165,7 +184,7 @@ impl<P: Platform, F: FlashOps> Device<P, F> {
         if Sha256::digest(&head)[..TABLE_ENTRY] != table[..TABLE_ENTRY] {
             return Err(wire::BAD_BLOCK);
         }
-        if h.target != target::MODULE && (head.len() < 14 || head[0] != 0xe9 || u16::from_le_bytes([head[12], head[13]]) as u8 != h.cpu)
+        if h.target != target::MODULE && (head.len() < 14 || head[0] != 0xe9 || u16::from_le_bytes([head[12], head[13]]) != u16::from(h.cpu))
         {
             return Err(wire::BAD_IMAGE_HEADER);
         }
@@ -200,23 +219,23 @@ impl<P: Platform, F: FlashOps> Device<P, F> {
         expect_fin(s)?;
 
         if !transport.dry {
-            // Commit: the head sector last, then the state records.
+            // Commit. The state records come first and every failure is reported: an image must not
+            // become bootable with its key or its rollback state unsaved. (A failed head write after
+            // this leaves a raised minimum version, which reinstalling the same version satisfies.)
+            let saved = (self.state.view.pin.is_some() || self.state.append(REC_PIN, &pubkey))
+                && match h.target {
+                    target::LOADER => self.state.append_u32(REC_MINVER_LOADER, h.version),
+                    target::STAGE2 => self.state.append_u32(REC_MINVER_STAGE2, h.version),
+                    _ => slot.is_none_or(|s| self.state.append_module_version(s, h.version)),
+                };
+            if !saved {
+                return Err(wire::STATE_WRITE);
+            }
             sink.write_block(0, &head).map_err(|_| wire::FLASH)?;
             sink.finish().map_err(|_| wire::FLASH)?;
-            if self.state.view.pin.is_none() {
-                self.state.append(REC_PIN, &pubkey);
-            }
-            match h.target {
-                target::LOADER => self.state.append_u32(REC_MINVER_LOADER, h.version),
-                target::STAGE2 => self.state.append_u32(REC_MINVER_STAGE2, h.version),
-                _ => true,
-            };
         }
         let _ = writeln!(s, "OK {} ms={}{}", size, started.elapsed().as_millis(), if transport.dry { " dry" } else { "" });
         Ok(if transport.dry { Outcome::None } else { Outcome::Installed { target: h.target } })
     }
 }
 
-// REC_MINVER (Main) is written by the loader that installs Main, not by a running Main.
-#[allow(dead_code)]
-const _: u8 = REC_MINVER;

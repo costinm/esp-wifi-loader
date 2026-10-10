@@ -19,6 +19,9 @@ pub const REC_HEADER: u8 = 3;
 pub const REC_QIO: u8 = 4;
 pub const REC_MINVER_LOADER: u8 = 5;
 pub const REC_MINVER_STAGE2: u8 = 6;
+/// One module slot: `slot u8` + `u32` minimum version.
+pub const REC_MINVER_MODULE: u8 = 7;
+pub const MODULE_SLOTS: usize = 8;
 
 const MAGIC: u32 = 0x3153_4c57; // "WLS1"
 const ACTIVE: u32 = 0xa5a5_a5a5;
@@ -39,6 +42,7 @@ pub struct View {
     pub minver: Option<u32>,
     pub minver_loader: Option<u32>,
     pub minver_stage2: Option<u32>,
+    pub minver_module: [Option<u32>; MODULE_SLOTS],
     pub header: Option<[u8; HEADER_SIZE]>,
     /// 0 none, 1 QIO ok, 2 DIO only.
     pub qio: u8,
@@ -50,6 +54,9 @@ impl View {
         match ty {
             REC_PIN if d.len() == PUBKEY_SIZE => self.pin = Some(d.try_into().unwrap()),
             REC_MINVER => self.minver = u32_of(d).or(self.minver),
+            REC_MINVER_MODULE if d.len() == 5 && (d[0] as usize) < MODULE_SLOTS => {
+                self.minver_module[d[0] as usize] = Some(u32::from_le_bytes([d[1], d[2], d[3], d[4]]));
+            }
             REC_HEADER if d.len() == HEADER_SIZE => self.header = Some(d.try_into().unwrap()),
             REC_QIO if d.len() == 1 => self.qio = d[0],
             REC_MINVER_LOADER => self.minver_loader = u32_of(d).or(self.minver_loader),
@@ -160,6 +167,11 @@ impl<F: FlashOps> StateLog<F> {
         &mut self.ops
     }
 
+    /// Whether a record with `payload` bytes still fits in the active sector (false: the next append compacts).
+    pub fn fits(&self, payload: usize) -> bool {
+        self.active.is_some() && !self.dirty && self.used + 4 + padded(payload) as u32 <= SECTOR
+    }
+
     /// Read both sectors back (a copy of the 8 KiB area), for tests and diagnostics.
     pub fn flash_snapshot(&mut self) -> alloc::vec::Vec<u8> {
         let mut v = alloc::vec![0u8; SIZE as usize];
@@ -209,6 +221,16 @@ impl<F: FlashOps> StateLog<F> {
         for (ty, val) in [(REC_MINVER, v.minver), (REC_MINVER_LOADER, v.minver_loader), (REC_MINVER_STAGE2, v.minver_stage2)] {
             if let Some(x) = val {
                 if !put(self, ty, &x.to_le_bytes(), &mut off) {
+                    return false;
+                }
+            }
+        }
+        for (slot, val) in v.minver_module.iter().enumerate() {
+            if let Some(x) = val {
+                let mut rec = [0u8; 5];
+                rec[0] = slot as u8;
+                rec[1..].copy_from_slice(&x.to_le_bytes());
+                if !put(self, REC_MINVER_MODULE, &rec, &mut off) {
                     return false;
                 }
             }
@@ -265,6 +287,14 @@ impl<F: FlashOps> StateLog<F> {
 
     pub fn append_u32(&mut self, ty: u8, v: u32) -> bool {
         self.append(ty, &v.to_le_bytes())
+    }
+
+    /// Record the minimum version of one module slot.
+    pub fn append_module_version(&mut self, slot: u8, v: u32) -> bool {
+        let mut rec = [0u8; 5];
+        rec[0] = slot;
+        rec[1..].copy_from_slice(&v.to_le_bytes());
+        self.append(REC_MINVER_MODULE, &rec)
     }
 
     /// Erase both sectors (an explicit ownership change).

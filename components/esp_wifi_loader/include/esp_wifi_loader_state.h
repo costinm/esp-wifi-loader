@@ -18,6 +18,8 @@
 #define WL_REC_QIO 4u     /* u8 verdict */
 #define WL_REC_MINVER_LOADER 5u /* u32 minimum loader version (bootstrap mode) */
 #define WL_REC_MINVER_STAGE2 6u /* u32 minimum Stage2 version (bootstrap mode) */
+#define WL_REC_MINVER_MODULE 7u /* u8 slot + u32: minimum version of one module slot (Rust crate) */
+#define WL_MODULE_SLOTS 8
 
 #define WL_QIO_OK 1u
 #define WL_QIO_DIO_ONLY 2u
@@ -39,6 +41,8 @@ typedef struct {
     uint32_t minver, minver_loader, minver_stage2;
     uint8_t header[WL_HEADER_SIZE];
     uint8_t qio; /* 0 none, WL_QIO_* */
+    uint8_t has_module; /* bit per module slot with a recorded minimum version */
+    uint32_t minver_module[WL_MODULE_SLOTS];
 } wl_state_view_t;
 
 typedef struct {

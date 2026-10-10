@@ -157,7 +157,7 @@ public final class FlashService extends Service {
                 if (ssid == null) hotspot.joinRescue(); else hotspot.joinRescue(ssid);
                 break;
             case "send": sendTo(intent); break;
-            case "p2p": hotspot.startP2pGroup(); break;
+            case "p2p": { String n = intent.getStringExtra("ssid"); if (n == null) hotspot.startP2pGroup(); else hotspot.startP2pGroup(n); break; }
             case CMD_STOP: hotspot.stopAll(); break;
             case CMD_FLASH_ALL: // test hook: flash every device seen now
                 String kind = intent.getStringExtra(EXTRA_BUNDLED);

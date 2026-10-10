@@ -34,7 +34,7 @@ fn package(k: &SigningKey, cpu: u8, target: u8, version: u32, image: &[u8], name
     p
 }
 
-/// An ESP image: 0xE9 magic and the chip id at offset 12.
+/// An ESP image: 0xE9 magic and the chip id (u16) at offset 12 of esp_image_header_t.
 fn esp_image(len: usize, chip: u8) -> Vec<u8> {
     let mut v: Vec<u8> = (0..len).map(|i| (i * 31 + 7) as u8).collect();
     v[0] = 0xe9;
@@ -120,6 +120,9 @@ impl Platform for Plat {
             return Err(wire::BAD_LENGTH);
         }
         Ok(RecSink(self.events.clone()))
+    }
+    fn module_slot(&self, name: &[u8]) -> Option<u8> {
+        [&b"lora"[..], b"flash", b"hw", b"hello"].iter().position(|n| *n == name).map(|i| i as u8)
     }
 }
 
@@ -274,11 +277,45 @@ fn zero_length_main_manifest_requests_the_loader() {
 }
 
 #[test]
-fn reboot_request() {
+fn an_unsigned_reboot_request_is_refused() {
     let (mut d, _) = device();
     let mut w = Wire::new(Transport::encode(false, true), &[]);
-    assert_eq!(d.serve(&mut w), Outcome::Reboot);
-    assert_eq!(w.reply(), "OK 0\n");
+    assert_eq!(d.serve(&mut w), Outcome::None);
+    assert!(w.last().starts_with("ERR 2 "), "{}", w.reply());
+}
+
+#[test]
+fn a_required_pinned_key_blocks_trust_on_first_use() {
+    let events = Rc::new(RefCell::new(Events::default()));
+    let mut d = Device::new(Plat { chip: C6, events: events.clone() }, Mem::blank()).require_pinned_key();
+    let img = esp_image(9000, 13);
+    let (o, w) = upload(&mut d, &package(&key(1), C6, target::LOADER, 5, &img, b""), false);
+    assert_eq!((o, w.last()), (Outcome::None, "ERR 8 no-pinned-key".to_string()));
+    assert!(events.borrow().0.is_empty());
+    // once a key is pinned (here: by an earlier install on a device without the requirement), only it works
+    let mut free = Device::new(Plat { chip: C6, events }, Mem::blank());
+    upload(&mut free, &package(&key(1), C6, target::LOADER, 5, &img, b""), false);
+    let mem = Mem { data: free.state.flash_snapshot(), ..Default::default() };
+    let mut d = Device::new(Plat { chip: C6, events: Rc::new(RefCell::new(Events::default())) }, mem).require_pinned_key();
+    assert_eq!(upload(&mut d, &package(&key(1), C6, target::LOADER, 6, &img, b""), false).0,
+               Outcome::Installed { target: target::LOADER });
+    let (o, w) = upload(&mut d, &package(&key(2), C6, target::LOADER, 7, &img, b""), false);
+    assert_eq!((o, w.last()), (Outcome::None, "ERR 8 key-mismatch".to_string()));
+}
+
+#[test]
+fn a_failed_state_write_fails_the_install_before_the_head_is_written() {
+    // Cut the power at each of the first writes of the state log while an install saves its key and version.
+    // (On a blank log saving the key takes three writes and the version one more.)
+    for cut in 1..=4 {
+        let (mut d, ev) = device();
+        d.state.ops().fail_at = Some(cut);
+        let (o, w) = upload(&mut d, &package(&key(1), C6, target::LOADER, 5, &esp_image(9000, 13), b""), false);
+        assert_eq!(o, Outcome::None, "cut {cut}: {}", w.reply());
+        assert!(w.last().starts_with("ERR 5 state-write"), "cut {cut}: {}", w.reply());
+        let e = ev.borrow();
+        assert!(!e.0.iter().any(|x| x.starts_with("block 0") || x == "finish"), "cut {cut}: {:?}", e.0);
+    }
 }
 
 #[test]
@@ -290,8 +327,12 @@ fn modules_go_to_named_slots_and_may_be_small() {
     assert_eq!(ev.borrow().0, ["begin 100", "block 0 100", "finish"]);
     let (o, w) = upload(&mut d, &package(&key(1), C6, target::MODULE, 1, &module, b"nosuch"), false);
     assert_eq!((o, w.last()), (Outcome::None, "ERR 10 wrong-chip-or-target".to_string()));
-    // modules have no rollback check
-    assert_eq!(upload(&mut d, &package(&key(1), C6, target::MODULE, 0, &module, b"lora"), false).0,
+    // module versions are tracked per slot
+    assert_eq!(upload(&mut d, &package(&key(1), C6, target::MODULE, 4, &module, b"lora"), false).0,
+               Outcome::Installed { target: target::MODULE });
+    let (o, w) = upload(&mut d, &package(&key(1), C6, target::MODULE, 3, &module, b"lora"), false);
+    assert_eq!((o, w.last()), (Outcome::None, "ERR 9 rollback".to_string()));
+    assert_eq!(upload(&mut d, &package(&key(1), C6, target::MODULE, 1, &module, b"hw"), false).0,
                Outcome::Installed { target: target::MODULE });
 }
 
@@ -360,4 +401,43 @@ fn state_log_survives_compaction_and_power_loss() {
         assert!(again.append_u32(state::REC_MINVER_LOADER, 1001), "cut {cut}"); // heals a torn slot
         assert_eq!(StateLog::open(std::mem::take(again.ops())).view.minver_loader, Some(1001));
     }
+}
+
+#[test]
+fn power_loss_during_compaction_keeps_one_readable_copy() {
+    let mut log = StateLog::open(Mem::blank());
+    assert!(log.append(state::REC_PIN, &[4u8; 65]));
+    assert!(log.append_module_version(2, 9));
+    assert!(log.append_u32(state::REC_MINVER_LOADER, 7));
+    // fill the active sector until the next 216-byte record no longer fits
+    let mut filler = 1u8;
+    while log.fits(216) {
+        assert!(log.append(state::REC_HEADER, &[filler; 216]));
+        filler = filler.wrapping_add(1);
+    }
+    let snapshot = log.flash_snapshot();
+    for cut in 1..16 {
+        let mut l = StateLog::open(Mem { data: snapshot.clone(), fail_at: Some(cut), ..Default::default() });
+        let _ = l.append(state::REC_HEADER, &[0xee; 216]); // compacts into the other sector
+        let mut again = StateLog::open(Mem { data: std::mem::take(&mut l.ops().data), ..Default::default() });
+        assert!(again.view.pin.is_some(), "cut {cut}");
+        assert_eq!((again.view.minver_loader, again.view.minver_module[2]), (Some(7), Some(9)), "cut {cut}");
+        assert!(again.append_u32(state::REC_MINVER_LOADER, 8), "cut {cut}"); // heals a torn sector
+        assert_eq!(StateLog::open(std::mem::take(again.ops())).view.minver_loader, Some(8), "cut {cut}");
+    }
+}
+
+#[test]
+fn a_real_idf_image_header_is_accepted_and_the_wrong_chip_refused() {
+    // The first 16 bytes of an unmodified ESP-IDF image for the ESP32-C6 (the loader build): wp_pin 0xEE at
+    // offset 8, chip id 0x000d at offset 12.
+    let real = [0xe9, 0x05, 0x02, 0x20, 0x16, 0x06, 0x80, 0x40, 0xee, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00];
+    let mut img: Vec<u8> = (0..9000).map(|i| (i * 31 + 7) as u8).collect();
+    img[..16].copy_from_slice(&real);
+    let (mut d, _) = device();
+    assert_eq!(upload(&mut d, &package(&key(1), C6, target::LOADER, 5, &img, b""), false).0,
+               Outcome::Installed { target: target::LOADER });
+    img[12] = 0x09; // an ESP32-S3 image sent to a C6
+    let (o, w) = upload(&mut d, &package(&key(1), C6, target::LOADER, 6, &img, b""), false);
+    assert_eq!((o, w.last()), (Outcome::None, "ERR 4 bad-image-header".to_string()));
 }
