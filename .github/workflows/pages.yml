@@ -1,23 +1,38 @@
+# Publishes web/ (the browser flashers) with the firmware from the latest successful build.
+# One-time setup: repository Settings > Pages > Build and deployment > Source: "GitHub Actions".
 name: pages
 on:
   workflow_run: {workflows: [build], types: [completed], branches: [main, master]}
   workflow_dispatch:
-permissions: {contents: read, pages: write, id-token: write}
+    inputs:
+      run_id:
+        description: "Run id of a successful 'build' run to publish (last number in its URL)"
+        required: true
+# actions: read lets download-artifact fetch the artifacts of the build run.
+permissions: {contents: read, actions: read, pages: write, id-token: write}
+concurrency: {group: pages, cancel-in-progress: false}
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment: {name: github-pages, url: "${{ steps.d.outputs.page_url }}"}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with: {path: art, run-id: "${{ github.event.workflow_run.id }}", github-token: "${{ secrets.GITHUB_TOKEN }}"}
+        with:
+          path: art
+          pattern: firmware-*
+          run-id: ${{ github.event.workflow_run.id || inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Copy binaries next to the manifests (one origin)
         run: |
           mkdir -p site && cp -r web/* site/
           for cpu in esp32 esp32s3 esp32c6; do
-            mkdir -p site/fw/$cpu && cp art/firmware-$cpu/*.bin site/fw/$cpu/ || true
+            mkdir -p site/fw/$cpu
+            cp art/firmware-$cpu/*.bin site/fw/$cpu/ || echo "no firmware for $cpu"
           done
           python3 web/make_manifests.py site
+          ls -R site | head -40
       - uses: actions/upload-pages-artifact@v3
         with: {path: site}
       - id: d

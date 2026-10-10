@@ -42,7 +42,7 @@ jobs:
     container: ghcr.io/cirruslabs/android-sdk:36-ndk
     steps:
       - uses: actions/checkout@v4
-      - run: yes | sdkmanager "platforms;android-36.1" >/dev/null   # API 36.1: open local-only hotspot
+      - run: yes | sdkmanager "platforms;android-36.1" >/dev/null   # API 36.1: the app is compiled against it
       - working-directory: android
         run: ./gradlew :app:testDebugUnitTest :app:assembleDebug
       - uses: actions/upload-artifact@v4
