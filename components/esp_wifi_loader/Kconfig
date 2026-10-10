@@ -1,0 +1,82 @@
+menu "esp-wifi-loader"
+
+    choice WL_MODE
+        prompt "Role of this image"
+        default WL_MODE_LOADER
+
+        config WL_MODE_LOADER
+            bool "Loader (factory partition): installs Main"
+            help
+                Runs from the loader partition. Accepts signed Main images
+                (header target 1).
+
+        config WL_MODE_BOOTSTRAP
+            bool "Bootstrap (main partition): installs the loader and Stage2"
+            help
+                The same code built to run as Main. Accepts signed loader
+                (target 2) and Stage2 (target 3) images and writes the loader
+                partition / bootloader region. Needs
+                CONFIG_SPI_FLASH_DANGEROUS_WRITE_ALLOWED. An interrupted
+                Stage2 write cannot be recovered over Wi-Fi.
+
+        config WL_MODE_LIBRARY
+            bool "Library (linked into Main, e.g. DMesh's Rust firmware)"
+            help
+                No networking of its own: Main accepts TCP connections on its
+                network and hands each socket to esp_wifi_loader_serve(). Takes
+                the same signed loader (2) and Stage2 (3) images as the bootstrap
+                build, and a zero-length Main manifest (target 1, image size 0)
+                that makes it reboot into the loader for an upgrade.
+    endchoice
+
+    config WL_PASSPHRASE
+        string "WPA2 passphrase of both networks (public, hardcoded)"
+        default "untrusted-open-mode"
+        help
+            Same constant DMesh uses (DMESH_AP_PASSPHRASE). It is not a secret:
+            nodes are untrusted and integrity comes from the signed image, not
+            from the link. WPA2 only makes the networks joinable through the
+            standard Android APIs. Must be 8..63 characters.
+
+    config WL_FLASH_SSID
+        string "Flasher network SSID (WPA2)"
+        default "ESP-FLASH"
+        help
+            Hosted by the Android or Linux flasher: "I can flash devices;
+            broken devices, come to me."
+
+    config WL_RESCUE_SSID
+        string "Rescue network SSID (WPA2)"
+        default "ESP-RESCUE"
+        help
+            Hosted by a device in the loader: "I am broken, please rescue me."
+
+    config WL_PORT
+        int "TCP upload port and UDP announce port"
+        default 5227
+
+    config WL_ANNOUNCE_GROUP
+        string "Announce multicast group"
+        default "ff02::5227"
+
+    config WL_SCAN_INTERVAL_S
+        int "Seconds between ESP-FLASH scans while hosting ESP-RESCUE"
+        default 15
+
+    config WL_IDLE_TIMEOUT_S
+        int "Seconds idle before returning to Main (only if Main is valid)"
+        default 180
+
+    config WL_RESCUE_CHANNEL
+        int "ESP-RESCUE channel"
+        default 1
+
+    config WL_CRYPTO_STUB
+        bool "Stub out SHA-256 / ECDSA (SIZE EXPERIMENT ONLY)"
+        default n
+        help
+            Removes the loader's own crypto so the image shows how much
+            of mbedTLS the Wi-Fi stack needs by itself. The loader then
+            rejects every upload. Never enable on a real device.
+
+endmenu
