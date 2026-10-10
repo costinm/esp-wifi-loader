@@ -1,0 +1,8 @@
+# Build-time table only. The device keeps the real table written by Stage2's
+# build (boot/partitions/*.csv, loader = 0xe0000). This one stops the loader
+# image 8 KiB short of its slot: the last two sectors are the state log
+# (docs/boot.md), and IDF's size check then fails the build if the image grows.
+nvs,        data, nvs,     0x9000,   0x6000,
+phy_init,   data, phy,     0xf000,   0x1000,
+loader,     app,  factory, 0x10000,  0xde000,
+main,       app,  ota_0,   0xf0000,  0x2d0000,

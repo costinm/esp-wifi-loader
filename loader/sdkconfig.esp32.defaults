@@ -1,0 +1,8 @@
+# ESP-IDF wifi/iperf classic ESP32 settings (static RX <= 25, BA <= 2*static).
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=16
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65534
+CONFIG_LWIP_TCP_WND_DEFAULT=65534
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+# Flash driver stays DIO (Stage2 boots the loader in DIO; see README) at the
+# common 80 MHz, unlike the iperf example's QIO/40 MHz.
