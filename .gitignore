@@ -6,3 +6,5 @@ sdkconfig
 sdkconfig.old
 target/
 android/app/src/main/assets/
+# the signed test fixtures of the Android unit tests are tracked
+!android/app/src/test/resources/*.wlpkg

@@ -138,8 +138,10 @@ public class WlTest {
     }
 
     @Test public void manifestIsOnlyForDevicesRunningMain() throws Exception {
-        byte[] m = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(
-                System.getProperty("wl.manifest", "src/test/resources/manifest.wlpkg")));
+        byte[] m;
+        try (java.io.InputStream in = getClass().getResourceAsStream("/manifest.wlpkg")) {
+            m = in.readAllBytes();
+        }
         WlPackage p = WlPackage.parse(m);
         assertNull(p.verify());
         assertEquals(0L, p.header.imageSize);
