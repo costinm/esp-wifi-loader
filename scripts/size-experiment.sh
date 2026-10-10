@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Loader size experiment: cumulative sdkconfig overlays from loader/size/.
+# Loader size experiment: cumulative sdkconfig overlays from docs/size-experiment/.
 #   scripts/size-experiment.sh [cpu]      # default esp32c6; results in target/size/<cpu>/
 # Prints image size per stage and the options that actually took effect (an
 # overlay line naming a missing option is silently dropped by ESP-IDF).
@@ -12,7 +12,7 @@ stages=(${STAGES:-s0-baseline s1-no-tls s2-no-wpa3 s3-trim s4-os s5-nocrypto s6-
 # BUILD=sN builds only the listed stages but still applies every earlier overlay.
 all=(s0-baseline s1-no-tls s2-no-wpa3 s3-trim s4-os s5-nocrypto s6-no-nvs-enc s7-prune-mbedtls)
 for st in "${all[@]}"; do
-    [[ $st != s0-baseline ]] && defaults="$defaults;$ROOT/loader/size/$st.defaults"
+    [[ $st != s0-baseline ]] && defaults="$defaults;$ROOT/docs/size-experiment/$st.defaults"
     # SKIP="s5-nocrypto s6-no-nvs-enc" leaves those overlays out of the chain.
     [[ " ${SKIP:-} " == *" $st "* ]] && { defaults="${defaults%;*}"; continue; }
     [[ " ${stages[*]} " == *" $st "* ]] || continue

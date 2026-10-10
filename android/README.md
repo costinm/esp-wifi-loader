@@ -10,7 +10,7 @@ and `MainActivity` are the Android parts.
 - **Networks**: both flash networks are WPA2 with the public constant passphrase
   `untrusted-open-mode`. The phone joins a device's `ESP-RESCUE` with `WifiNetworkSpecifier`
   (a system dialog the first time; the system scans, so no location permission), or can try to
-  host `ESP-FLASH` (`startLocalOnlyHotspotWithConfiguration`; the Android 17 Pixels tested
+  host the flasher network (`startLocalOnlyHotspotWithConfiguration`; the Android 17 Pixels tested
   ignored or refused it, see debugging.md).
 - **Where the package comes from**: a file you pick; else the app's files directory
   (`/sdcard/Android/data/com.github.costinm.espwifiloader/files/packages`, or the internal `files/packages`;
@@ -21,13 +21,30 @@ and `MainActivity` are the Android parts.
 - **Foreground service** (`FlashService`, type `connectedDevice`, partial wake lock + Wi-Fi
   lock): runs while an upload is in progress or a network is held, then stops itself.
 - **Rescuer** checkbox: the phone acts as the access point. While it is charging the service
-  stays up, hosts `ESP-FLASH` (local-only hotspot, WPA2) and devices in trouble scan for it, join
+  stays up, hosts the flasher network (`DIRECT-ef-flash`, WPA2) and devices in trouble scan for it, join
   and announce; it flashes those that announce in loader mode (each at most every 10 minutes).
   Where the phone refuses to host (every phone tested so far, see debugging.md) it falls back to
   joining a device's `ESP-RESCUE`, and retries hosting every 5 minutes. On battery it does not
   run: unplugging leaves the network and stops the service. Plugging back in needs the app to be
   opened (Android delivers no power broadcast to a stopped app). Joining `ESP-RESCUE` by hand
   ("Join ESP-RESCUE") is the manual, one-device path.
+
+## Can the phone host the flash network? Yes, as a Wi-Fi Direct group
+
+An open, freely named hotspot is not available to apps. What works is an ordinary WPA2 access point:
+
+1. **Wi-Fi P2P group** (Android 10+): the phone becomes a group owner named `DIRECT-ef-flash` with the
+   public passphrase, on 2.4 GHz (ESP32 radios do not do 5 GHz). The loader looks for this name as well as
+   any `DIRECT-xy-flash`. **Verified on a Pixel 3a (Android 15):** group on 2437 MHz, the C6 joined it as a
+   station and the rescuer installed a full application over it (4.8 s).
+2. **Local-only hotspot with a chosen name** (`startLocalOnlyHotspotWithConfiguration`, Android 17):
+   tried first when it exists, with the band forced to 2.4 GHz. Not verified: the two Android 17 phones
+   tested earlier ignored the name or refused (`ERROR_INCOMPATIBLE_MODE`, before the band was set to
+   2.4 GHz and with DMesh's own app possibly holding a Wi-Fi mode), and were locked for the retest.
+3. **Joining the device's `ESP-RESCUE`** (`WifiNetworkSpecifier`, one system prompt): the fallback, and
+   the manual path.
+
+The rescuer tries them in that order and retries hosting every few minutes.
 
 ## Bundled assets
 

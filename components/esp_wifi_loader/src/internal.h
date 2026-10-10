@@ -31,7 +31,7 @@ bool wl_state_open_flash(wl_state_t *st);
 /* net.c */
 typedef enum { WL_ROLE_STA, WL_ROLE_AP } wl_role_t;
 esp_err_t wl_net_init(void);
-bool wl_net_join_flash(void);          /* scan, join ESP-FLASH, wait for link-local */
+bool wl_net_join_flash(void);          /* scan, join the flasher network, wait for link-local */
 bool wl_net_host_rescue(void);         /* start ESP-RESCUE as AP, link-local only */
 bool wl_net_flash_visible(void);       /* scan while hosting */
 bool wl_net_link_up(void);

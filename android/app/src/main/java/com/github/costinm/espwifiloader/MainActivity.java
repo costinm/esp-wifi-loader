@@ -103,14 +103,14 @@ public final class MainActivity extends Activity {
         root.addView(packageInfo, match());
 
         rescuer = new CheckBox(this);
-        rescuer.setText("Rescuer: act as the access point (ESP-FLASH) and flash devices while charging");
+        rescuer.setText("Rescuer: act as the access point (flash network) and flash devices while charging");
         rescuer.setChecked(prefs.getBoolean(FlashService.PREF_RESCUER, false));
         rescuer.setOnCheckedChangeListener((v, on) -> { prefs.edit().putBoolean(FlashService.PREF_RESCUER, on).apply(); applyRescuer(); });
         root.addView(rescuer, match());
 
         LinearLayout row = new LinearLayout(this);
         row.addView(button("Join ESP-RESCUE", v -> command(FlashService.CMD_RESCUE)));
-        row.addView(button("Host ESP-FLASH", v -> command(FlashService.CMD_HOTSPOT)));
+        row.addView(button("Host flash network", v -> command(FlashService.CMD_HOTSPOT)));
         root.addView(row, match());
         LinearLayout row2 = new LinearLayout(this);
         row2.addView(button("Choose file…", v -> startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT)

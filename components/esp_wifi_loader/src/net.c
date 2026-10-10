@@ -1,13 +1,14 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* WPA2 flash networks (public constant passphrase), link-local IPv6 only (docs/boot.md "Network").
  *
- *  - Join the ESP-FLASH network when a scan sees it.
+ *  - Join the flasher network (DIRECT-xy-flash) when a scan sees it.
  *  - Otherwise host the ESP-RESCUE network and keep scanning for
- *    ESP-FLASH between connections.
+ *    the flasher network between connections.
  * No DHCPv4 client; the ESP-RESCUE AP runs a bare DHCPv4 server (no router/DNS) only so
  * Android accepts the network. No SLAAC/global address, no DNS: the flash networks
  * provide no internet and an untrusted device must not get any. */
 #include <string.h>
+#include <strings.h>
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -82,7 +83,17 @@ esp_err_t wl_net_init(void)
     return ESP_OK;
 }
 
-/* Blocking scan for the flasher network under either of its names; fills the best record. */
+/* The flasher network is named DIRECT-xy-<CONFIG_WL_FLASH_NAME>: xy is any two characters (Android
+ * chooses them for a Wi-Fi Direct group). */
+static bool is_flash_ssid(const char *name)
+{
+    static const char prefix[] = "DIRECT-";
+    const size_t p = sizeof(prefix) - 1, n = strlen(CONFIG_WL_FLASH_NAME);
+    return strlen(name) == p + 2 + 1 + n && strncasecmp(name, prefix, p) == 0 && name[p + 2] == '-' &&
+           strncasecmp(name + p + 3, CONFIG_WL_FLASH_NAME, n) == 0;
+}
+
+/* Blocking scan for the flasher network; fills the best record. */
 static bool scan_flash(wifi_ap_record_t *best)
 {
     static wifi_ap_record_t records[24];
@@ -92,9 +103,10 @@ static bool scan_flash(wifi_ap_record_t *best)
         esp_wifi_scan_get_ap_records(&count, records) != ESP_OK) return false;
     bool found = false;
     for (uint16_t i = 0; i < count; ++i) {
-        const char *name = (const char *)records[i].ssid;
-        if (strncmp(name, CONFIG_WL_FLASH_SSID, sizeof(records[i].ssid)) != 0 &&
-            strncmp(name, CONFIG_WL_FLASH_SSID_P2P, sizeof(records[i].ssid)) != 0) continue;
+        char name[sizeof(records[i].ssid) + 1];
+        memcpy(name, records[i].ssid, sizeof(records[i].ssid));
+        name[sizeof(records[i].ssid)] = 0;
+        if (!is_flash_ssid(name)) continue;
         if (!found || records[i].rssi > best->rssi) { *best = records[i]; found = true; }
     }
     ESP_LOGW("wl", "scan: %u networks, flash network %s", (unsigned)count, found ? "found" : "not seen");

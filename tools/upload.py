@@ -5,7 +5,7 @@
   upload.py send PACKAGE --host fe80::1%wlan0 [--port 5227] [--dry]
   upload.py reboot --host fe80::1%wlan0
 
-A Linux host runs the ESP-FLASH access point (hostapd, open) and shares no
+A Linux host runs the flasher access point (hostapd, WPA2, SSID DIRECT-xy-flash) and shares no
 internet with it. See docs/protocol.md.
 """
 import argparse

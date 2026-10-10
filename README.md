@@ -37,8 +37,8 @@ already set up.
   page), then everything else goes through the phone. The app can carry the loader images itself, so the
   loader can even be replaced over Wi-Fi.
 
-Android 13 or newer. Phones cannot host the flash network reliably yet, so the ESP hosts it and
-the phone joins; see `android/README.md`.
+Android 13 or newer. The phone can host the flash network itself (a Wi-Fi Direct group, WPA2, 2.4 GHz)
+so devices come to it, or join the device's own network; see `android/README.md`.
 
 ## Using it
 
@@ -51,7 +51,7 @@ the phone joins; see `android/README.md`.
 ## Status
 
 Working on ESP32-C6 with an Android 15 phone: blank board to installed application, the loader and
-Stage2 replacing themselves over Wi-Fi, and the unattended rescuer. ESP32 and ESP32-S3 build and are not
-yet run on hardware. Hosting the network from the phone does not work on any phone tried. DMesh's
+Stage2 replacing themselves over Wi-Fi, and the unattended rescuer, with the phone as the access point.
+ESP32 and ESP32-S3 build and are not yet run on hardware. Android 17 phones are still to be retested. DMesh's
 firmware links the code in and builds; flashing through it is still to be tested. Open items are in
 `TODO.md`, test notes and findings in `debugging.md`.

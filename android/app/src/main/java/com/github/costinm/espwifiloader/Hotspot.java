@@ -21,7 +21,7 @@ import java.util.function.Consumer;
  * The phone's side of the flash networks.
  *
  * <ul>
- * <li>{@link #startFlashNetwork}: host ESP-FLASH (WPA2, public passphrase) as a local-only
+ * <li>{@link #startFlashNetwork}: host the flasher network, DIRECT-xy-flash (WPA2, public passphrase) as a local-only
  *   hotspot. Android only lets an app choose the SSID from API 36.1; the Android 17
  *   Pixels tested ignored or refused the request (debugging.md). Experiment.</li>
  * <li>{@link #joinRescue}: join a device's ESP-RESCUE (WPA2, same passphrase). Works on
@@ -58,13 +58,18 @@ public final class Hotspot {
     /** Public constant shared with the firmware (CONFIG_WL_PASSPHRASE) and DMesh. */
     public static final String PASSPHRASE = "untrusted-open-mode";
     private static final int JOIN_TIMEOUT_MS = 25_000;
-    public static final String FLASH_SSID = "ESP-FLASH";
+    public static final String FLASH_NAME = "flash";
     public static final String RESCUE_SSID = "ESP-RESCUE";
-    /** Wi-Fi P2P group names must look like DIRECT-xy-...; the loader joins this one too. */
-    public static final String FLASH_SSID_P2P = "DIRECT-ef-flash";
+    /**
+     * Android requires a Wi-Fi Direct group name of the form DIRECT-xy-...; we use "ef". The loader
+     * accepts any two characters, so another flasher may choose its own.
+     */
+    private final String flashSsid = "DIRECT-ef-" + FLASH_NAME;
+
+    public String flashSsid() { return flashSsid; }
 
     public void startFlashNetwork() {
-        startFlashNetwork(FLASH_SSID, PASSPHRASE);
+        startFlashNetwork(flashSsid, PASSPHRASE);
     }
 
     public void startFlashNetwork(String ssid, String passphrase) {
@@ -116,7 +121,7 @@ public final class Hotspot {
             if (p2p == null || p2pChannel == null) throw new IllegalStateException("no Wi-Fi P2P");
             state = "starting";
             WifiP2pConfig cfg = new WifiP2pConfig.Builder()
-                    .setNetworkName(FLASH_SSID_P2P)
+                    .setNetworkName(flashSsid)
                     .setPassphrase(PASSPHRASE)
                     .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_2GHZ)
                     .enablePersistentMode(false)
@@ -139,8 +144,8 @@ public final class Hotspot {
                 @Override public void onSuccess() {
                     p2pGroup = true;
                     lock.acquire();
-                    state = "hosting " + FLASH_SSID_P2P + " (P2P group)";
-                    log.accept("P2P group started: " + FLASH_SSID_P2P);
+                    state = "hosting " + flashSsid + " (P2P group)";
+                    log.accept("P2P group started: " + flashSsid);
                     p2p.requestGroupInfo(p2pChannel, g -> {
                         if (g != null) log.accept("P2P group " + g.getNetworkName() + " owner=" + g.isGroupOwner()
                                 + " iface=" + g.getInterface());
@@ -181,7 +186,7 @@ public final class Hotspot {
     public void joinRescue() { joinRescue(RESCUE_SSID); }
 
     public boolean joined() { return rescueCallback != null && state.startsWith("joined"); }
-    /** When hosting ESP-FLASH last failed (0 = never), so callers can fall back. */
+    /** When hosting the flasher network last failed (0 = never), so callers can fall back. */
     public long hostFailedAt() { return hostFailedAt; }
     public boolean hostingOrStarting() { return reservation != null || p2pGroup || state.equals("starting"); }
     public boolean hosting() { return reservation != null || p2pGroup; }

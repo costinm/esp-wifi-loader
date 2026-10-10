@@ -107,7 +107,7 @@ esp_err_t esp_wifi_loader_run(void)
 
     int64_t idle = now_ms() + CONFIG_WL_IDLE_TIMEOUT_S * 1000LL;
     for (;;) {
-        /* Join ESP-FLASH if it is there, otherwise host ESP-RESCUE. */
+        /* Join the flasher network if it is there, otherwise host ESP-RESCUE. */
         bool linked = wl_net_join_flash() || wl_net_host_rescue();
         if (!linked) {
             vTaskDelay(pdMS_TO_TICKS(1000));
@@ -120,7 +120,7 @@ esp_err_t esp_wifi_loader_run(void)
                 announce(udp, wl_net_ifindex(), ctx, !ANNOUNCE_BOOTSTRAP && !ctx->main_present);
                 next_announce = now_ms() + ANNOUNCE_PERIOD_MS;
             }
-            /* While hosting, look for ESP-FLASH between connections. */
+            /* While hosting, look for the flasher network between connections. */
             if (wl_net_role() == WL_ROLE_AP && now_ms() >= next_scan) {
                 if (wl_net_flash_visible()) break; /* re-enter: join it */
                 next_scan = now_ms() + CONFIG_WL_SCAN_INTERVAL_S * 1000LL;
@@ -144,6 +144,6 @@ esp_err_t esp_wifi_loader_run(void)
             idle = now_ms() + CONFIG_WL_IDLE_TIMEOUT_S * 1000LL;
             next_announce = 0;
         }
-        ESP_LOGW(TAG, "link lost or ESP-FLASH appeared; reselecting network");
+        ESP_LOGW(TAG, "link lost or the flasher network appeared; reselecting network");
     }
 }

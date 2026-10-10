@@ -28,7 +28,7 @@ esp_err_t esp_wifi_loader_init(void);
  * zero-length manifest restarts it into the loader, from inside this call. */
 esp_wifi_loader_result_t esp_wifi_loader_serve(int fd);
 
-/* Run the loader (loader and bootstrap builds only): join ESP-FLASH or host ESP-RESCUE, announce, accept signed
+/* Run the loader (loader and bootstrap builds only): join the flasher network or host ESP-RESCUE, announce, accept signed
  * uploads. Returns only on error; on success it restarts into Main. */
 esp_err_t esp_wifi_loader_run(void);
 

@@ -38,20 +38,14 @@ menu "esp-wifi-loader"
             from the link. WPA2 only makes the networks joinable through the
             standard Android APIs. Must be 8..63 characters.
 
-    config WL_FLASH_SSID
-        string "Flasher network SSID (WPA2)"
-        default "ESP-FLASH"
+    config WL_FLASH_NAME
+        string "Name of the flasher network, DIRECT-xy-<name>"
+        default "flash"
         help
-            Hosted by the Android or Linux flasher: "I can flash devices;
-            broken devices, come to me."
-
-    config WL_FLASH_SSID_P2P
-        string "Flasher network SSID when the phone hosts it as a Wi-Fi P2P group"
-        default "DIRECT-ef-flash"
-        help
-            Android names a Wi-Fi P2P group "DIRECT-xy-...". A phone that cannot host a
-            freely named hotspot (before Android 17) hosts a P2P group with this name and
-            the same passphrase; the loader joins either name.
+            The flasher network (hosted by the Android app or a Linux host) is a WPA2 network
+            named DIRECT-xy-<name>, where xy is any two characters: that is how Android names a
+            Wi-Fi Direct group, and a phone picks the two characters itself. The loader joins any
+            network whose name has this shape.
 
     config WL_RESCUE_SSID
         string "Rescue network SSID (WPA2)"
@@ -68,7 +62,7 @@ menu "esp-wifi-loader"
         default "ff02::5227"
 
     config WL_SCAN_INTERVAL_S
-        int "Seconds between ESP-FLASH scans while hosting ESP-RESCUE"
+        int "Seconds between scans for the flasher network while hosting ESP-RESCUE"
         default 15
 
     config WL_IDLE_TIMEOUT_S

@@ -219,7 +219,7 @@ public final class FlashService extends Service {
         boolean rescuer = rescuerActive();
         long now = System.currentTimeMillis();
         if (rescuer) {
-            // The rescuer is the access point: host ESP-FLASH and let devices in trouble
+            // The rescuer is the access point: host the flasher network and let devices in trouble
             // come to the phone (they scan for it, join and announce). Where the phone
             // refuses to host (most do, see debugging.md) go to a device's ESP-RESCUE
             // instead, and try hosting again every few minutes.
@@ -228,7 +228,7 @@ public final class FlashService extends Service {
                 rescuerOwnsNetwork = true;
                 long failed = hotspot.hostFailedAt();
                 if (failed == 0 || now - failed > HOST_RETRY_MS) {
-                    log("rescuer: hosting " + Hotspot.FLASH_SSID);
+                    log("rescuer: hosting " + hotspot.flashSsid());
                     hotspot.startFlashNetwork();
                 } else {
                     hotspot.joinRescue();
@@ -297,7 +297,7 @@ public final class FlashService extends Service {
     private String summary() {
         int busy = flasher.busyCount();
         if (busy > 0) return "Flashing " + busy + " device" + (busy > 1 ? "s" : "");
-        if (rescuerActive()) return "Rescuer active (charging, " + (hotspot.hosting() ? "hosting " + Hotspot.FLASH_SSID : "joining a device") + "), " + flasher.devices().size() + " device(s) seen";
+        if (rescuerActive()) return "Rescuer active (charging, " + (hotspot.hosting() ? "hosting " + hotspot.flashSsid() : "joining a device") + "), " + flasher.devices().size() + " device(s) seen";
         return "Network: " + hotspot.state();
     }
 
