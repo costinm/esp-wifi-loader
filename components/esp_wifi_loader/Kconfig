@@ -45,6 +45,14 @@ menu "esp-wifi-loader"
             Hosted by the Android or Linux flasher: "I can flash devices;
             broken devices, come to me."
 
+    config WL_FLASH_SSID_P2P
+        string "Flasher network SSID when the phone hosts it as a Wi-Fi P2P group"
+        default "DIRECT-ef-flash"
+        help
+            Android names a Wi-Fi P2P group "DIRECT-xy-...". A phone that cannot host a
+            freely named hotspot (before Android 17) hosts a P2P group with this name and
+            the same passphrase; the loader joins either name.
+
     config WL_RESCUE_SSID
         string "Rescue network SSID (WPA2)"
         default "ESP-RESCUE"

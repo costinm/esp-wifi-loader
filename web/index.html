@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>esp-wifi-loader</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.0.1/dist/web/install-button.js?module"></script>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { max-width: 40rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  td, th { padding: .3rem .8rem; text-align: left; }
+</style>
+</head>
+<body>
+<h1>esp-wifi-loader</h1>
+<p>Installs a small Wi-Fi loader on a blank ESP32 board. The loader then receives your
+signed application over Wi-Fi: no USB cable needed after this step.</p>
+<h2>ESP Web Tools</h2>
+<p>Chrome or Edge, board connected over USB. 4 MB and 8 MB flash have different partition tables.</p>
+<table>
+  <tr><th>Chip</th><th>4 MB</th><th>8 MB</th></tr>
+  <tr><td>ESP32</td>
+      <td><esp-web-install-button manifest="manifest-esp32-4mb.json"></esp-web-install-button></td>
+      <td><esp-web-install-button manifest="manifest-esp32-8mb.json"></esp-web-install-button></td></tr>
+  <tr><td>ESP32-S3</td>
+      <td><esp-web-install-button manifest="manifest-esp32s3-4mb.json"></esp-web-install-button></td>
+      <td><esp-web-install-button manifest="manifest-esp32s3-8mb.json"></esp-web-install-button></td></tr>
+  <tr><td>ESP32-C6</td>
+      <td><esp-web-install-button manifest="manifest-esp32c6-4mb.json"></esp-web-install-button></td>
+      <td><esp-web-install-button manifest="manifest-esp32c6-8mb.json"></esp-web-install-button></td></tr>
+</table>
+<h2>ESP Launchpad</h2>
+<p><a id="lp" href="#">Open in ESP Launchpad</a></p>
+<script>
+  document.getElementById("lp").href =
+    "https://espressif.github.io/esp-launchpad/?flashConfigURL=" +
+    encodeURIComponent(new URL("launchpad.toml", location.href).href);
+</script>
+<h2>After flashing</h2>
+<p>A fresh board has no application, so it starts the loader. The loader joins the open
+<code>ESP-FLASH</code> network if a flasher hosts it, otherwise it hosts <code>ESP-RESCUE</code>
+and announces <code>state=blank</code>.</p>
+<p class="muted"><a href="https://github.com/costinm/esp-wifi-loader">github.com/costinm/esp-wifi-loader</a></p>
+</body>
+</html>

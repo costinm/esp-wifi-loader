@@ -9,6 +9,7 @@
  * provide no internet and an untrusted device must not get any. */
 #include <string.h>
 #include "esp_event.h"
+#include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -81,26 +82,29 @@ esp_err_t wl_net_init(void)
     return ESP_OK;
 }
 
-/* Blocking scan for the flasher network; fills the best record. */
-static bool scan_for(const char *ssid, wifi_ap_record_t *best)
+/* Blocking scan for the flasher network under either of its names; fills the best record. */
+static bool scan_flash(wifi_ap_record_t *best)
 {
-    wifi_scan_config_t scan = {.ssid = (uint8_t *)ssid, .show_hidden = false};
-    uint16_t count = 8;
-    wifi_ap_record_t records[8];
+    static wifi_ap_record_t records[24];
+    wifi_scan_config_t scan = {.show_hidden = false};
+    uint16_t count = sizeof(records) / sizeof(records[0]);
     if (esp_wifi_scan_start(&scan, true) != ESP_OK ||
         esp_wifi_scan_get_ap_records(&count, records) != ESP_OK) return false;
     bool found = false;
     for (uint16_t i = 0; i < count; ++i) {
-        if (strncmp((const char *)records[i].ssid, ssid, sizeof(records[i].ssid)) != 0) continue;
+        const char *name = (const char *)records[i].ssid;
+        if (strncmp(name, CONFIG_WL_FLASH_SSID, sizeof(records[i].ssid)) != 0 &&
+            strncmp(name, CONFIG_WL_FLASH_SSID_P2P, sizeof(records[i].ssid)) != 0) continue;
         if (!found || records[i].rssi > best->rssi) { *best = records[i]; found = true; }
     }
+    ESP_LOGW("wl", "scan: %u networks, flash network %s", (unsigned)count, found ? "found" : "not seen");
     return found;
 }
 
 bool wl_net_flash_visible(void)
 {
     wifi_ap_record_t best;
-    return scan_for(CONFIG_WL_FLASH_SSID, &best);
+    return scan_flash(&best);
 }
 
 bool wl_net_join_flash(void)
@@ -112,9 +116,9 @@ bool wl_net_join_flash(void)
         esp_wifi_set_mode(WIFI_MODE_STA);
         ap_active = false;
     }
-    if (!scan_for(CONFIG_WL_FLASH_SSID, &best)) return false;
+    if (!scan_flash(&best)) return false;
     wifi_config_t cfg = {0};
-    strlcpy((char *)cfg.sta.ssid, CONFIG_WL_FLASH_SSID, sizeof(cfg.sta.ssid));
+    memcpy(cfg.sta.ssid, best.ssid, sizeof(cfg.sta.ssid)); /* whichever name was found */
     strlcpy((char *)cfg.sta.password, CONFIG_WL_PASSPHRASE, sizeof(cfg.sta.password));
     cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     cfg.sta.channel = best.primary;
