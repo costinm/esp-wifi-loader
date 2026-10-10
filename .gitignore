@@ -8,3 +8,5 @@ target/
 android/app/src/main/assets/
 # the signed test fixtures of the Android unit tests are tracked
 !android/app/src/test/resources/*.wlpkg
+# Rust crate test fixtures made by tools/sign.py (throwaway key) and tests/make_state_fixture.c
+!tests/data/*

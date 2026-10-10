@@ -1,0 +1,25 @@
+[package]
+name = "esp-wifi-loader"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "The esp-wifi-loader upload protocol in Rust: wire format, signature check, state log and a one-connection device server. Independent of the C component."
+repository = "https://github.com/costinm/esp-wifi-loader"
+
+# A second implementation of docs/protocol.md for firmware written in Rust (DMesh's Main). Duplication
+# of the C component is deliberate: nothing here links against it, builds it or needs its Kconfig.
+[workspace]
+
+[features]
+default = ["std"]
+# The device server reads and writes std::io streams; the wire format, the signature check and the
+# state log work without it (no_std + alloc).
+std = []
+
+[dependencies]
+# Stable releases, on purpose: the crate does not follow the dependency pins of the firmware that uses it.
+sha2 = { version = "0.10", default-features = false }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+
+[dev-dependencies]
+p256 = { version = "0.13", features = ["ecdsa"] }

@@ -90,8 +90,9 @@ def main():
     s.add_argument("--cpu", required=True, choices=sorted(wf.CHIPS))
     s.add_argument("--version", required=True, type=int)
     s.add_argument("--target", choices=sorted(wf.TARGETS), default="main",
-                   help="main (loader mode), loader or stage2 (bootstrap mode)")
-    s.add_argument("--fqdn", default="", help="download host announced for Main updates")
+                   help="main (loader mode), loader or stage2 (bootstrap mode), module (Rust Main: use --name)")
+    s.add_argument("--fqdn", "--name", dest="fqdn", default="",
+                   help="download host announced for Main updates; the module name for --target module")
     s.add_argument("--image", help="image to sign (not with --request-loader)")
     s.add_argument("--request-loader", action="store_true",
                    help="zero-length Main manifest: a Main running the component reboots into the loader")

@@ -17,6 +17,7 @@ joins the ESP's flash network, gets images from the net or from storage, and act
 | `bootstrap/` | the same code built as Main: installs the loader and Stage2 (docs/bootstrap.md) |
 | `components/esp_wifi_loader/` | the shared code; an application can link it |
 | `android/` | the Android app: the flash station |
+| `src/`, `Cargo.toml` | the same protocol as a Rust crate, for firmware written in Rust (DMesh): wire format, signature check, state log, a one-connection server |
 | `tools/` | `sign.py`, `upload.py`: sign images, send them from a computer |
 | `web/` | GitHub Pages: install the first image from the browser |
 | `docs/` | design: `boot.md`, `protocol.md`, `app-integration.md`, `building.md` |

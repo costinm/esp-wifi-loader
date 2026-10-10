@@ -15,6 +15,11 @@ jobs:
           -I components/esp_wifi_loader/include tests/test_state.c
           components/esp_wifi_loader/src/state_core.c -o /tmp/test_state &&
           /tmp/test_state
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test --locked
   firmware:
     needs: host-tests
     runs-on: ubuntu-latest
