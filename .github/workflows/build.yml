@@ -1,0 +1,65 @@
+name: build
+on:
+  push: {branches: [main, master]}
+  pull_request:
+  workflow_dispatch:
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install cryptography
+      - run: python3 tests/test_tools.py
+      - run: >
+          gcc -Wall -Wextra -fsanitize=address,undefined
+          -I components/esp_wifi_loader/include tests/test_state.c
+          components/esp_wifi_loader/src/state_core.c -o /tmp/test_state &&
+          /tmp/test_state
+  firmware:
+    needs: host-tests
+    runs-on: ubuntu-latest
+    # Same image as the local Dockerfile (docker.io/espressif/idf:v6.0.2). Push
+    # the project image to ghcr.io later and point both at it.
+    container: espressif/idf:v6.0.2
+    strategy:
+      matrix:
+        cpu: [esp32, esp32s3, esp32c6]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          . "$IDF_PATH/export.sh" >/dev/null 2>&1
+          scripts/build.sh ${{ matrix.cpu }} all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.cpu }}
+          path: target/out/${{ matrix.cpu }}/*.bin
+  android:
+    needs: host-tests
+    runs-on: ubuntu-latest
+    container: ghcr.io/cirruslabs/android-sdk:36-ndk
+    steps:
+      - uses: actions/checkout@v4
+      - run: yes | sdkmanager "platforms;android-36.1" >/dev/null   # API 36.1: open local-only hotspot
+      - working-directory: android
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flasher-debug-apk
+          path: target/android-build/app/outputs/apk/debug/*.apk
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: firmware
+    runs-on: ubuntu-latest
+    permissions: {contents: write}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {path: dl}          # dl/firmware-<cpu>/*.bin
+      - run: |
+          mkdir rel
+          for d in dl/firmware-*; do cpu=${d#dl/firmware-}; for f in "$d"/*.bin; do cp "$f" "rel/$cpu-$(basename "$f")"; done; done
+          (cd rel && sha256sum *.bin > SHA256SUMS)
+      - uses: softprops/action-gh-release@v2
+        with: {files: "rel/*"}

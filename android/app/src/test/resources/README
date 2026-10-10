@@ -1,0 +1,3 @@
+sample.wlpkg: a throwaway-key package of 5000 random bytes, made with
+  tools/sign.py sign --cpu esp32c6 --version 7 --fqdn dl.example.org --image img.bin
+The key is not used anywhere else.
