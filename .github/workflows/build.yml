@@ -9,17 +9,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: pip install cryptography
-      - run: python3 tests/test_tools.py
-      - run: >
-          gcc -Wall -Wextra -fsanitize=address,undefined
-          -I components/esp_wifi_loader/include tests/test_state.c
-          components/esp_wifi_loader/src/state_core.c -o /tmp/test_state &&
-          /tmp/test_state
+      - run: scripts/test-host.sh tools
   rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: cargo test --locked
+      - run: scripts/test-host.sh rust
   firmware:
     needs: host-tests
     runs-on: ubuntu-latest
@@ -48,12 +43,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: yes | sdkmanager "platforms;android-36.1" >/dev/null   # API 36.1: the app is compiled against it
-      - working-directory: android
-        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug
+      - run: scripts/test-host.sh android
+      # Signed release APK when the keystore secrets exist (docs/building.md), else the debug APK.
+      - run: scripts/android-release.sh
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       - uses: actions/upload-artifact@v4
         with:
-          name: flasher-debug-apk
-          path: target/android-build/app/outputs/apk/debug/*.apk
+          name: flasher-apk
+          path: target/release-apk/esp-wifi-loader.apk
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: firmware
@@ -68,48 +67,27 @@ jobs:
           (cd rel && sha256sum *.bin > SHA256SUMS)
       - uses: softprops/action-gh-release@v2
         with: {files: "rel/*"}
-  # Signs the images with the loader key and publishes them as the rolling `latest` release, which the Android
-  # flasher downloads (https://github.com/costinm/esp-wifi-loader/releases/download/latest/<chip>.wlpkg; short
-  # form costinm/esp-wifi-loader:latest). Needs the repository secret WL_SIGNING_KEY: the PEM private key whose
-  # public half is keys/loader.pub (the key every Stage2 built here carries):
-  #   gh secret set WL_SIGNING_KEY --repo costinm/esp-wifi-loader < ~/.config/dmesh/loader-signing-key.pem
+  # Signs the images with the loader key and publishes them, with the Android app, as the rolling `latest` release,
+  # which the app downloads (https://github.com/costinm/esp-wifi-loader/releases/download/latest/<chip>.wlpkg; short
+  # form costinm/esp-wifi-loader:latest). Needs the repository secret WL_SIGNING_KEY (docs/building.md, "Whose key
+  # signs what"). The logic is in scripts/publish-release.sh and scripts/publish-latest.sh: run them locally to test.
   publish:
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    needs: [firmware, rust]
+    needs: [firmware, rust, android]
     runs-on: ubuntu-latest
     permissions: {contents: write}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with: {path: dl}          # dl/firmware-<cpu>/*.bin
-      - name: Sign
+        with: {path: dl}          # dl/firmware-<cpu>/*.bin, dl/flasher-apk/esp-wifi-loader.apk
+      - run: pip install cryptography
+      - name: Sign and collect
         env:
           WL_SIGNING_KEY: ${{ secrets.WL_SIGNING_KEY }}
         run: |
-          set -euo pipefail
-          [ -n "$WL_SIGNING_KEY" ] || { echo "::error::secret WL_SIGNING_KEY is not set (see the comment above this job)"; exit 1; }
-          pip install cryptography
-          key="$RUNNER_TEMP/release-key.pem"
-          install -m 600 /dev/null "$key"
-          printf '%s\n' "$WL_SIGNING_KEY" > "$key"
-          [ "$(python3 tools/sign.py pubkey "$key" 2>/dev/null)" = "$(cat keys/loader.pub)" ] ||
-            { echo "::error::WL_SIGNING_KEY does not match keys/loader.pub"; exit 1; }
           for d in dl/firmware-*; do mkdir -p "target/out/${d#dl/firmware-}"; cp "$d"/*.bin "target/out/${d#dl/firmware-}/"; done
-          version="$(date -u +%y%m%d%H%M)"
-          VERSION="$version" OUT_DIR="$PWD/rel" scripts/pack-android-assets.sh "$key"
-          # <chip>.wlpkg is the Main package of the repository: here the bootstrap build
-          for f in rel/*-main.wlpkg; do cp "$f" "rel/$(basename "${f%-main.wlpkg}").wlpkg"; done
-          # the merged images for a first USB or web flash
-          for d in dl/firmware-*; do cpu="${d#dl/firmware-}"; for f in "$d"/factory-*.bin; do cp "$f" "rel/$cpu-$(basename "$f")"; done; done
-          rm -f "$key"
-          (cd rel && sha256sum * > SHA256SUMS)
-          echo "version=$version" >> "$GITHUB_ENV"
+          APK="$PWD/dl/flasher-apk/esp-wifi-loader.apk" scripts/publish-release.sh
       - name: Publish the rolling release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release delete latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
-          gh release create latest rel/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "latest ($version)" \
-            --notes "Signed loader, bootstrap and Stage2 packages (version $version, commit $GITHUB_SHA); factory-*.bin are merged images for a USB or web flash. Short form for the flasher app: $GITHUB_REPOSITORY:latest."
+        run: scripts/publish-latest.sh "$version"

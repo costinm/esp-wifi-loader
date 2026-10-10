@@ -16,9 +16,24 @@ android {
         versionCode = 1
         versionName = "0.1"
     }
-    buildTypes {
-        release { isMinifyEnabled = false }
+    // Release signing comes from the environment (scripts/android-release.sh, scripts/android-keystore.sh); without
+    // it the release build stays unsigned.
+    val keystore = providers.environmentVariable("ANDROID_KEYSTORE").orNull
+    if (keystore != null) {
+        signingConfigs.create("release") {
+            storeFile = file(keystore)
+            storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").get()
+            keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").getOrElse("flasher")
+            keyPassword = storePassword
+        }
     }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            if (keystore != null) signingConfig = signingConfigs.getByName("release")
+        }
+    }
+    lint { checkReleaseBuilds = false }   // lint needs its own downloads; not part of the release build
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

@@ -60,7 +60,7 @@ static void announce(int udp, unsigned iface, const wl_upload_ctx_t *ctx, bool b
     const wl_state_view_t *v = &ctx->state->view;
     const char *state = blank ? "blank" : (ANNOUNCE_BOOTSTRAP || WL_RTC_REASON == WL_REASON_UPDATE) ? "update" : "crash";
     uint32_t version = 0;
-    char key[9] = "none", fqdn[129] = "";
+    char key[9] = "none", anchor_fp[9] = "none", fqdn[129] = "";
     if (v->has_header) {
         const wl_header_t *h = (const wl_header_t *)v->header;
         version = h->version;
@@ -70,19 +70,22 @@ static void announce(int udp, unsigned iface, const wl_upload_ctx_t *ctx, bool b
     }
     uint8_t anchor[WL_PUBKEY_SIZE];
     bool has_anchor = wl_trust_key(anchor);
-    if (has_anchor || v->has_pin) {
-        uint8_t hash[32];
-        if (wl_sha256(has_anchor ? anchor : v->pin, WL_PUBKEY_SIZE, hash)) {
-            snprintf(key, sizeof(key), "%02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
-        }
+    /* key= is the pinned Main key, anchor= the loader key from the Stage2 region: the loader key signs the
+     * loader and Stage2, the pinned key (trust on first use) signs Main and modules. */
+    uint8_t hash[32];
+    if (v->has_pin && wl_sha256(v->pin, WL_PUBKEY_SIZE, hash)) {
+        snprintf(key, sizeof(key), "%02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
+    }
+    if (has_anchor && wl_sha256(anchor, WL_PUBKEY_SIZE, hash)) {
+        snprintf(anchor_fp, sizeof(anchor_fp), "%02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
     }
     uint8_t mac[6];
     wl_net_mac(mac);
     char line[400];
     int n = snprintf(line, sizeof(line),
-                     "esp-wifi-loader v=1 mode=" MODE_NAME " state=%s version=%lu key=%s fqdn=%s chip=%s "
+                     "esp-wifi-loader v=1 mode=" MODE_NAME " state=%s version=%lu key=%s anchor=%s fqdn=%s chip=%s "
                      "mac=%02x:%02x:%02x:%02x:%02x:%02x port=%d role=%s loader=%d up=%lld\n",
-                     state, (unsigned long)version, key, fqdn, CONFIG_IDF_TARGET,
+                     state, (unsigned long)version, key, anchor_fp, fqdn, CONFIG_IDF_TARGET,
                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], CONFIG_WL_PORT,
                      wl_net_role() == WL_ROLE_AP ? "ap" : "sta", WL_VERSION,
                      (long long)(now_ms() / 1000));

@@ -29,6 +29,8 @@ public final class Announce {
     public String mac() { return get("mac", "?"); }
     public String role() { return get("role", "?"); }
     public String key() { return get("key", "none"); }
+    /** The loader key in the device's Stage2 (signs the loader and Stage2); "none" without one. */
+    public String anchor() { return get("anchor", "none"); }
     public String fqdn() { return get("fqdn", ""); }
     public long version() { try { return Long.parseLong(get("version", "0")); } catch (NumberFormatException e) { return 0; } }
     public int port() { try { return Integer.parseInt(get("port", "")); } catch (NumberFormatException e) { return Wl.PORT; } }
