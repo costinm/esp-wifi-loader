@@ -68,3 +68,48 @@ jobs:
           (cd rel && sha256sum *.bin > SHA256SUMS)
       - uses: softprops/action-gh-release@v2
         with: {files: "rel/*"}
+  # Signs the images with the loader key and publishes them as the rolling `latest` release, which the Android
+  # flasher downloads (https://github.com/costinm/esp-wifi-loader/releases/download/latest/<chip>.wlpkg; short
+  # form costinm/esp-wifi-loader:latest). Needs the repository secret WL_SIGNING_KEY: the PEM private key whose
+  # public half is keys/loader.pub (the key every Stage2 built here carries):
+  #   gh secret set WL_SIGNING_KEY --repo costinm/esp-wifi-loader < ~/.config/dmesh/loader-signing-key.pem
+  publish:
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    needs: [firmware, rust]
+    runs-on: ubuntu-latest
+    permissions: {contents: write}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {path: dl}          # dl/firmware-<cpu>/*.bin
+      - name: Sign
+        env:
+          WL_SIGNING_KEY: ${{ secrets.WL_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$WL_SIGNING_KEY" ] || { echo "::error::secret WL_SIGNING_KEY is not set (see the comment above this job)"; exit 1; }
+          pip install cryptography
+          key="$RUNNER_TEMP/release-key.pem"
+          install -m 600 /dev/null "$key"
+          printf '%s\n' "$WL_SIGNING_KEY" > "$key"
+          [ "$(python3 tools/sign.py pubkey "$key" 2>/dev/null)" = "$(cat keys/loader.pub)" ] ||
+            { echo "::error::WL_SIGNING_KEY does not match keys/loader.pub"; exit 1; }
+          for d in dl/firmware-*; do mkdir -p "target/out/${d#dl/firmware-}"; cp "$d"/*.bin "target/out/${d#dl/firmware-}/"; done
+          version="$(date -u +%y%m%d%H%M)"
+          VERSION="$version" OUT_DIR="$PWD/rel" scripts/pack-android-assets.sh "$key"
+          # <chip>.wlpkg is the Main package of the repository: here the bootstrap build
+          for f in rel/*-main.wlpkg; do cp "$f" "rel/$(basename "${f%-main.wlpkg}").wlpkg"; done
+          # the merged images for a first USB or web flash
+          for d in dl/firmware-*; do cpu="${d#dl/firmware-}"; for f in "$d"/factory-*.bin; do cp "$f" "rel/$cpu-$(basename "$f")"; done; done
+          rm -f "$key"
+          (cd rel && sha256sum * > SHA256SUMS)
+          echo "version=$version" >> "$GITHUB_ENV"
+      - name: Publish the rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create latest rel/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "latest ($version)" \
+            --notes "Signed loader, bootstrap and Stage2 packages (version $version, commit $GITHUB_SHA); factory-*.bin are merged images for a USB or web flash. Short form for the flasher app: $GITHUB_REPOSITORY:latest."

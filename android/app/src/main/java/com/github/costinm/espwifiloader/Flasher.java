@@ -58,15 +58,43 @@ public final class Flasher {
     public boolean isAnyBusy() { return !busy.isEmpty(); }
     public boolean isBusy(String mac) { return busy.contains(mac); }
 
+    /** Directory under a bare host where a site publishes its packages ({@code https://host/fw/<chip>.wlpkg}). */
+    static final String SITE_PATH = "fw";
+    private static final java.util.regex.Pattern GITHUB =
+            java.util.regex.Pattern.compile("^([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+)(?::([A-Za-z0-9._-]+))?$");
+
     /**
-     * What the user typed for a brand-new device: a bare domain ("example.org"), or a
-     * URL that may contain {chip}. Returns the template, or "" for empty input.
+     * Where packages come from, as the user types it or a device announces it (its {@code fqdn}). Returns a URL
+     * template ending in {@code {chip}.wlpkg}, or "" for empty input:
+     * <ul>
+     * <li>{@code owner/repo} or {@code owner/repo:tag}: assets of a GitHub release, the tag defaulting to
+     *     {@code latest} (the rolling release the CI publishes);</li>
+     * <li>a bare host ({@code example.com}): {@code https://example.com/fw/{chip}.wlpkg};</li>
+     * <li>a host with a path, or a full URL: that path/URL, with {@code {chip}.wlpkg} appended unless the URL
+     *     already contains {@code {chip}}.</li>
+     * </ul>
      */
     public static String normalizeTemplate(String input) {
         String t = input == null ? "" : input.trim();
         if (t.isEmpty()) return "";
-        if (!t.contains("://")) t = "https://" + t.replaceAll("/+$", "") + "/{chip}.wlpkg";
-        return t;
+        if (t.contains("://")) {
+            return t.contains("{chip}") ? t : t.replaceAll("/+$", "") + "/{chip}.wlpkg";
+        }
+        java.util.regex.Matcher m = GITHUB.matcher(t);
+        // "example.com/dl" has a dot in its first part: a host with a path, not owner/repo.
+        if (m.matches() && !m.group(1).contains(".")) {
+            String tag = m.group(3) == null ? "latest" : m.group(3);
+            return "https://github.com/" + m.group(1) + "/" + m.group(2) + "/releases/download/" + tag + "/{chip}.wlpkg";
+        }
+        if (t.contains("{chip}")) return "https://" + t;
+        if (!t.contains("/")) return "https://" + t + "/" + SITE_PATH + "/{chip}.wlpkg";
+        return "https://" + t.replaceAll("/+$", "") + "/{chip}.wlpkg";
+    }
+
+    /** The package URL for a chip and kind ("main" is {@code <chip>.wlpkg}, others {@code <chip>-<kind>.wlpkg}). */
+    static String packageUrl(String template, String chip, String kind) {
+        String file = kind.equals("main") ? chip + ".wlpkg" : chip + "-" + kind + ".wlpkg";
+        return template.replace("{chip}.wlpkg", file).replace("{chip}", chip);
     }
 
     public void onAnnounce(Announce a, InetAddress addr) {
@@ -113,8 +141,9 @@ public final class Flasher {
             return p;
         }
         String url;
-        if (!a.fqdn().isEmpty()) url = "https://" + a.fqdn() + "/" + a.chip() + ".wlpkg";
-        else if (!template.isEmpty()) url = template.replace("{chip}", a.chip());
+        String kind = a.mode().equals("bootstrap") ? "loader" : "main";
+        if (!a.fqdn().isEmpty()) url = packageUrl(normalizeTemplate(a.fqdn()), a.chip(), kind);
+        else if (!template.isEmpty()) url = packageUrl(template, a.chip(), kind);
         else {
             // Nothing to download from: use the bundled image this device mode takes.
             WlPackage p = bundled(a, a.mode().equals("bootstrap") ? "loader" : "main");

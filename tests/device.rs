@@ -99,6 +99,7 @@ impl Sink for RecSink {
 struct Plat {
     chip: u8,
     events: Rc<RefCell<Events>>,
+    anchor: Option<[u8; 65]>,
 }
 impl Platform for Plat {
     type Sink = RecSink;
@@ -120,6 +121,9 @@ impl Platform for Plat {
             return Err(wire::BAD_LENGTH);
         }
         Ok(RecSink(self.events.clone()))
+    }
+    fn trusted_key(&self) -> Option<[u8; 65]> {
+        self.anchor
     }
     fn module_slot(&self, name: &[u8]) -> Option<u8> {
         [&b"lora"[..], b"flash", b"hw", b"hello"].iter().position(|n| *n == name).map(|i| i as u8)
@@ -166,7 +170,7 @@ impl FlashOps for Mem {
 
 fn device() -> (Device<Plat, Mem>, Rc<RefCell<Events>>) {
     let events = Rc::new(RefCell::new(Events::default()));
-    (Device::new(Plat { chip: C6, events: events.clone() }, Mem::blank()), events)
+    (Device::new(Plat { chip: C6, events: events.clone(), anchor: None }, Mem::blank()), events)
 }
 
 fn upload(d: &mut Device<Plat, Mem>, pkg: &[u8], dry: bool) -> (Outcome, Wire) {
@@ -287,16 +291,16 @@ fn an_unsigned_reboot_request_is_refused() {
 #[test]
 fn a_required_pinned_key_blocks_trust_on_first_use() {
     let events = Rc::new(RefCell::new(Events::default()));
-    let mut d = Device::new(Plat { chip: C6, events: events.clone() }, Mem::blank()).require_pinned_key();
+    let mut d = Device::new(Plat { chip: C6, events: events.clone(), anchor: None }, Mem::blank()).require_pinned_key();
     let img = esp_image(9000, 13);
     let (o, w) = upload(&mut d, &package(&key(1), C6, target::LOADER, 5, &img, b""), false);
     assert_eq!((o, w.last()), (Outcome::None, "ERR 8 no-pinned-key".to_string()));
     assert!(events.borrow().0.is_empty());
     // once a key is pinned (here: by an earlier install on a device without the requirement), only it works
-    let mut free = Device::new(Plat { chip: C6, events }, Mem::blank());
+    let mut free = Device::new(Plat { chip: C6, events, anchor: None }, Mem::blank());
     upload(&mut free, &package(&key(1), C6, target::LOADER, 5, &img, b""), false);
     let mem = Mem { data: free.state.flash_snapshot(), ..Default::default() };
-    let mut d = Device::new(Plat { chip: C6, events: Rc::new(RefCell::new(Events::default())) }, mem).require_pinned_key();
+    let mut d = Device::new(Plat { chip: C6, events: Rc::new(RefCell::new(Events::default())), anchor: None }, mem).require_pinned_key();
     assert_eq!(upload(&mut d, &package(&key(1), C6, target::LOADER, 6, &img, b""), false).0,
                Outcome::Installed { target: target::LOADER });
     let (o, w) = upload(&mut d, &package(&key(2), C6, target::LOADER, 7, &img, b""), false);
@@ -440,4 +444,54 @@ fn a_real_idf_image_header_is_accepted_and_the_wrong_chip_refused() {
     img[12] = 0x09; // an ESP32-S3 image sent to a C6
     let (o, w) = upload(&mut d, &package(&key(1), C6, target::LOADER, 6, &img, b""), false);
     assert_eq!((o, w.last()), (Outcome::None, "ERR 4 bad-image-header".to_string()));
+}
+
+#[test]
+fn a_trust_anchor_replaces_trust_on_first_use() {
+    let anchor = pubkey(&key(1));
+    let events = Rc::new(RefCell::new(Events::default()));
+    let mut d = Device::new(Plat { chip: C6, events, anchor: Some(anchor) }, Mem::blank()).require_pinned_key();
+    let img = esp_image(9000, 13);
+    // another key is refused even though nothing is pinned yet
+    let (o, w) = upload(&mut d, &package(&key(2), C6, target::LOADER, 5, &img, b""), false);
+    assert_eq!((o, w.last()), (Outcome::None, "ERR 8 key-mismatch".to_string()));
+    // the anchored key installs, and nothing is pinned in the state log
+    assert_eq!(upload(&mut d, &package(&key(1), C6, target::LOADER, 5, &img, b""), false).0,
+               Outcome::Installed { target: target::LOADER });
+    assert_eq!(d.state.view.pin, None);
+    assert_eq!(d.state.view.minver_loader, Some(5));
+}
+
+#[test]
+fn the_trust_slot_made_by_the_python_tool_parses() {
+    // tests/data/trust-slot.bin: `tools/sign.py embed-key` output at 0x6F00 of an image made with keys/loader.pub
+    let slot = std::fs::read("tests/data/trust-slot.bin").unwrap();
+    assert_eq!(slot.len(), esp_wifi_loader::wire::TRUST_SIZE);
+    let key = esp_wifi_loader::wire::parse_trust_slot(&slot).expect("slot parses");
+    let hex = std::fs::read_to_string("keys/loader.pub").unwrap();
+    assert_eq!(key.iter().map(|b| format!("{b:02x}")).collect::<String>(), hex.trim());
+    assert_eq!(esp_wifi_loader::wire::parse_trust_slot(&[0xff; 256]), None);
+}
+
+#[test]
+fn the_loader_key_signs_the_loader_and_stage2_while_main_and_modules_use_the_users_key() {
+    let anchor = pubkey(&key(1));
+    let events = Rc::new(RefCell::new(Events::default()));
+    let mut d = Device::new(Plat { chip: C6, events, anchor: Some(anchor) }, Mem::blank());
+    let img = esp_image(9000, 13);
+    let module = vec![7u8; 100];
+    // the user's key is pinned by its first module and cannot replace the loader or Stage2
+    assert_eq!(upload(&mut d, &package(&key(2), C6, target::MODULE, 1, &module, b"hello"), false).0,
+               Outcome::Installed { target: target::MODULE });
+    assert_eq!(d.state.view.pin, Some(pubkey(&key(2))));
+    for t in [target::LOADER, target::STAGE2] {
+        let (o, w) = upload(&mut d, &package(&key(2), C6, t, 5, &img, b""), false);
+        assert_eq!((o, w.last()), (Outcome::None, "ERR 8 key-mismatch".to_string()));
+    }
+    // a third key is refused for modules; the loader key still installs the loader and a Main manifest
+    assert_eq!(upload(&mut d, &package(&key(3), C6, target::MODULE, 2, &module, b"hello"), false).0, Outcome::None);
+    assert_eq!(upload(&mut d, &package(&key(1), C6, target::LOADER, 5, &img, b""), false).0,
+               Outcome::Installed { target: target::LOADER });
+    assert_eq!(d.state.view.pin, Some(pubkey(&key(2))));
+    assert_eq!(upload(&mut d, &package(&key(1), C6, target::MAIN, 1, &[], b""), false).0, Outcome::RequestLoader);
 }

@@ -10,6 +10,7 @@ and never joins the home network. Separate 'flash networks' are used; integrity 
 images (ECDSA P-256, key pinned on first install), not from the network. An Android app hosts or
 joins the ESP's flash network, gets images from the net or from storage, and acts as the flash station.
 
+
 | Path | What |
 |---|---|
 | `boot/` | Stage2: the second-stage bootloader that selects Main or the loader |
@@ -21,6 +22,9 @@ joins the ESP's flash network, gets images from the net or from storage, and act
 | `tools/` | `sign.py`, `upload.py`: sign images, send them from a computer |
 | `web/` | GitHub Pages: install the first image from the browser |
 | `docs/` | design: `boot.md`, `protocol.md`, `app-integration.md`, `building.md` |
+
+Keys: the github secret in this repository signs only the loader and Stage2 built here; an application using the loader signs its
+own Main with its own key. Fork it to use your own keys with the same GitHub workflow and app (docs/building.md).
 
 ## Android app
 

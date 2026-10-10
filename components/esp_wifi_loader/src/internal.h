@@ -27,6 +27,8 @@ _Static_assert(sizeof(wl_header_t) == WL_HEADER_SIZE, "signed header size");
 
 /* state.c */
 bool wl_state_open_flash(wl_state_t *st);
+/* The trust anchor from the Stage2 region (false: none, pin the first key instead). */
+bool wl_trust_key(uint8_t key[WL_PUBKEY_SIZE]);
 
 /* net.c */
 typedef enum { WL_ROLE_STA, WL_ROLE_AP } wl_role_t;

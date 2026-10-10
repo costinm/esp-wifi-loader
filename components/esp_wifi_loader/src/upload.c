@@ -133,20 +133,31 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
     if (hdr.magic != WL_MAGIC || !verify_signature(pub, sig, &hdr)) goto fail;
     const wl_state_view_t *v = &ctx->state->view;
     code = 8; reason = "key-mismatch";
-    if (v->has_pin && memcmp(v->pin, pub, sizeof(pub))) goto fail;
+    /* The key in the Stage2 region (the loader key), when there is one, is the only one that may sign the
+     * loader and Stage2. Main and modules are signed by whatever key the user chose: the first one seen is
+     * pinned (trust on first use), and the loader key is accepted for them too, as that is how a
+     * recovery image ("loader as Main") is installed. Without a Stage2 key every target is pinned. */
+    uint8_t anchor[WL_PUBKEY_SIZE];
+    bool has_anchor = wl_trust_key(anchor);
+    bool anchor_signed = has_anchor && memcmp(anchor, pub, sizeof(pub)) == 0;
+    bool boot_target = hdr.target == WL_TARGET_LOADER || hdr.target == WL_TARGET_STAGE2;
+    if (boot_target && has_anchor && !anchor_signed) goto fail;
+    if (!anchor_signed && v->has_pin && memcmp(v->pin, pub, sizeof(pub))) goto fail;
 #if CONFIG_WL_MODE_LIBRARY
     /* No trust on first use inside an application: the first sender on its network would pin their own
-     * key. The key has to be pinned already (by the loader's first install, or provisioned). */
+     * key. The key has to be the loader key or pinned already (by the loader's first install). */
     reason = "no-pinned-key";
-    if (!v->has_pin) goto fail;
+    if (!anchor_signed && !v->has_pin) goto fail;
 #endif
     code = 9; reason = "rollback";
+    /* The loader key's Main image is the recovery path: it neither checks nor raises the Main version. */
+    bool main_versioned = hdr.target == WL_TARGET_MAIN && !anchor_signed;
     {
         bool has = hdr.target == WL_TARGET_MAIN ? v->has_minver
                  : hdr.target == WL_TARGET_LOADER ? v->has_minver_loader : v->has_minver_stage2;
         uint32_t min = hdr.target == WL_TARGET_MAIN ? v->minver
                      : hdr.target == WL_TARGET_LOADER ? v->minver_loader : v->minver_stage2;
-        if (has && hdr.version < min) goto fail;
+        if (has && hdr.version < min && (hdr.target != WL_TARGET_MAIN || main_versioned)) goto fail;
     }
     /* A signed Main header with no image is a request to reboot into the loader. Only
      * where Main itself is running (bootstrap/library): the loader has nothing to reboot to. */
@@ -258,10 +269,10 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
          * reinstall of the same version satisfies.) */
         code = 5; reason = "state-write";
         uint32_t ver = hdr.version;
-        if (!ctx->state->view.has_pin && wl_state_append(ctx->state, WL_REC_PIN, pub, sizeof(pub))) goto fail;
+        if (!anchor_signed && !ctx->state->view.has_pin && wl_state_append(ctx->state, WL_REC_PIN, pub, sizeof(pub))) goto fail;
         uint8_t rec = hdr.target == WL_TARGET_MAIN ? WL_REC_MINVER
                     : hdr.target == WL_TARGET_LOADER ? WL_REC_MINVER_LOADER : WL_REC_MINVER_STAGE2;
-        if (wl_state_append(ctx->state, rec, &ver, sizeof(ver))) goto fail;
+        if ((hdr.target != WL_TARGET_MAIN || main_versioned) && wl_state_append(ctx->state, rec, &ver, sizeof(ver))) goto fail;
         if (hdr.target == WL_TARGET_MAIN && wl_state_append(ctx->state, WL_REC_HEADER, &hdr, sizeof(hdr))) goto fail;
         int64_t tm = now_ms();
         code = 5; reason = "head-commit";

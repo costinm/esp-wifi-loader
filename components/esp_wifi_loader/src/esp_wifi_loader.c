@@ -68,9 +68,11 @@ static void announce(int udp, unsigned iface, const wl_upload_ctx_t *ctx, bool b
         memcpy(fqdn, h->fqdn, n);
         fqdn[n] = 0;
     }
-    if (v->has_pin) {
+    uint8_t anchor[WL_PUBKEY_SIZE];
+    bool has_anchor = wl_trust_key(anchor);
+    if (has_anchor || v->has_pin) {
         uint8_t hash[32];
-        if (wl_sha256(v->pin, sizeof(v->pin), hash)) {
+        if (wl_sha256(has_anchor ? anchor : v->pin, WL_PUBKEY_SIZE, hash)) {
             snprintf(key, sizeof(key), "%02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
         }
     }

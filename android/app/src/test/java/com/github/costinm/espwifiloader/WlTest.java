@@ -108,7 +108,10 @@ public class WlTest {
         byte[] bytes = sample().bytes;
         f.packageFor(Announce.parse("esp-wifi-loader v=1 state=update chip=esp32c6 mac=m fqdn=dl.example.org"),
                 u -> { url[0] = u; return bytes; });
-        assertEquals("https://dl.example.org/esp32c6.wlpkg", url[0]);
+        assertEquals("https://dl.example.org/fw/esp32c6.wlpkg", url[0]);
+        f.packageFor(Announce.parse("esp-wifi-loader v=1 state=update chip=esp32c6 mac=m fqdn=costinm/dmesh:latest"),
+                u -> { url[0] = u; return bytes; });
+        assertEquals("https://github.com/costinm/dmesh/releases/download/latest/esp32c6.wlpkg", url[0]);
         f.template = "https://x/{chip}.wlpkg";
         f.packageFor(Announce.parse("esp-wifi-loader chip=esp32 mac=m"), u -> { url[0] = u; return bytes; });
         assertEquals("https://x/esp32.wlpkg", url[0]);
@@ -116,9 +119,29 @@ public class WlTest {
 
     @Test public void sourceTextBecomesTemplate() {
         assertEquals("", Flasher.normalizeTemplate("  "));
-        assertEquals("https://example.org/{chip}.wlpkg", Flasher.normalizeTemplate("example.org"));
-        assertEquals("https://example.org/{chip}.wlpkg", Flasher.normalizeTemplate(" example.org/ "));
+        // a bare host publishes its packages under /fw/
+        assertEquals("https://example.org/fw/{chip}.wlpkg", Flasher.normalizeTemplate("example.org"));
+        assertEquals("https://example.org/dl/{chip}.wlpkg", Flasher.normalizeTemplate(" example.org/dl/ "));
         assertEquals("https://h/x/{chip}.bin", Flasher.normalizeTemplate("https://h/x/{chip}.bin"));
+        assertEquals("https://h/x/{chip}.wlpkg", Flasher.normalizeTemplate("https://h/x/"));
+        // owner/repo[:tag] is a GitHub release
+        assertEquals("https://github.com/costinm/dmesh/releases/download/latest/{chip}.wlpkg",
+                Flasher.normalizeTemplate("costinm/dmesh"));
+        assertEquals("https://github.com/costinm/dmesh/releases/download/latest/{chip}.wlpkg",
+                Flasher.normalizeTemplate("costinm/dmesh:latest"));
+        assertEquals("https://github.com/costinm/ssh-mesh/releases/download/v1.2/{chip}.wlpkg",
+                Flasher.normalizeTemplate("costinm/ssh-mesh:v1.2"));
+        // the first part of a host has a dot: not owner/repo
+        assertEquals("https://example.org/fw2/{chip}.wlpkg", Flasher.normalizeTemplate("example.org/fw2"));
+    }
+
+    @Test public void packageUrlsFollowTheKind() {
+        String t = Flasher.normalizeTemplate("costinm/dmesh");
+        assertEquals("https://github.com/costinm/dmesh/releases/download/latest/esp32c6.wlpkg",
+                Flasher.packageUrl(t, "esp32c6", "main"));
+        assertEquals("https://github.com/costinm/dmesh/releases/download/latest/esp32c6-loader.wlpkg",
+                Flasher.packageUrl(t, "esp32c6", "loader"));
+        assertEquals("https://x.org/a/esp32.bin", Flasher.packageUrl("https://x.org/a/{chip}.bin", "esp32", "main"));
     }
 
     @Test public void bundledPackagesAreTheFallbackAndCanBeForced() throws Exception {

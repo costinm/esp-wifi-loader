@@ -14,9 +14,12 @@ and `MainActivity` are the Android parts.
   ignored or refused it, see debugging.md).
 - **Where the package comes from**: a file you pick; else the app's files directory
   (`/sdcard/Android/data/com.github.costinm.espwifiloader/files/packages`, or the internal `files/packages`;
-  `scripts/android-push-packages.sh` copies there over adb, no new APK needed); else the device's announced domain
-  (`https://<fqdn>/<chip>.wlpkg`); else the text box (a bare domain or a URL with `{chip}`) for
-  brand-new devices; else the assets bundled in the APK (below). The Spinner can force one bundled package.
+  `scripts/android-push-packages.sh` copies there over adb, no new APK needed); else the device's announced source
+  (`fqdn`) or, for brand-new devices, the text box. A source is `owner/repo[:tag]` (the assets of that GitHub
+  release; tag `latest` by default, so `costinm/dmesh:latest` means
+  `https://github.com/costinm/dmesh/releases/download/latest/<chip>.wlpkg`), a bare host (`https://host/fw/<chip>.wlpkg`),
+  a host with a path, or a URL (with `{chip}` or `<chip>.wlpkg` appended). A device that runs the bootstrap build asks
+  for `<chip>-loader.wlpkg` instead; else the assets bundled in the APK (below). The Spinner can force one bundled package.
   Packages are verified (signature, hashes, chip, key pin, version) before sending.
 - **Foreground service** (`FlashService`, type `connectedDevice`, partial wake lock + Wi-Fi
   lock): runs while an upload is in progress or a network is held, then stops itself.
