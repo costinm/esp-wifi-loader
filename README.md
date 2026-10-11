@@ -19,7 +19,7 @@ joins the ESP's flash network, gets images from the net or from storage, and act
 | `components/esp_wifi_loader/` | the shared code; an application can link it |
 | `android/` | the Android app: the flash station |
 | `src/`, `Cargo.toml` | the same protocol as a Rust crate, for firmware written in Rust (DMesh): wire format, signature check, state log, a one-connection server |
-| `tools/` | `sign.py`, `upload.py`: sign images, send them from a computer |
+| `tools/` | all the scripting, for the loader and for the applications built on it: `sign.py`, `sign-bundle.py` (sign a tree of images; `Dockerfile.sign`), `upload.py` (send a package to the loader or to an application's upload port, optionally through a phone's netcat), `provision.py` (put an application on a board with esptool and the flasher phone: backup, prepare, flash, verify), `reset.py` (reset a board, or make the five resets that start the loader) |
 | `web/` | GitHub Pages: install the first image from the browser |
 | `docs/` | design: `boot.md`, `protocol.md`, `app-integration.md`, `building.md` |
 
@@ -46,6 +46,38 @@ Android 13 or newer. The phone can host the flash network itself (a Wi-Fi Direct
 so devices come to it, or join the device's own network; see `android/README.md`.
 
 ## Using it
+
+### Sign and flash from Linux
+
+Build unsigned firmware with `scripts/build.sh`. Application inputs use
+`target/out/<cpu>/main.bin` (or `main-app.bin`) and optional
+`target/out/<cpu>/modules/mod_<name>.dmod`. The batch signer writes
+`<cpu>.wlpkg`, `<cpu>-<name>.wlpkg`, and `SHA256SUMS` to one output directory.
+It requires an existing P-256 PEM private key and a numeric version. It never
+creates a key implicitly.
+
+```sh
+podman build -f Dockerfile.sign -t esp-wifi-sign .
+rm -rf target/rel && mkdir -p target/rel
+podman run --rm -v "$PWD/target/out:/input:ro" \
+  -v "$HOME/.ssh/my-app-key.pem:/key/key.pem:ro" -v "$PWD/target/rel:/output" \
+  esp-wifi-sign --version 12 --fqdn owner/repo:latest
+```
+
+On Nix, `nix profile install path:$PWD#default` installs `esp-wifi-sign`,
+`esp-wifi-sign-one`, `esp-wifi-upload`, and `espflash`. Run the signer with
+`--input target/out --key /path/to/key.pem --output target/rel --version 12
+--fqdn owner/repo:latest`. The uploader runs on a Linux machine bridged or
+connected to the flash network: `esp-wifi-upload discover --iface wlan0`, then
+`esp-wifi-upload send target/rel/esp32c6.wlpkg --host fe80::ADDR%wlan0`.
+An `OK` reply confirms protocol acceptance; check the rebooted application
+separately.
+
+`WL_FIRMWARE_ROOT=$PWD/target/out nix build --impure path:$PWD#with-firmware`
+packages the already-built unsigned `stage2-*.bin`, `partition-table-*.bin`,
+`loader.bin`, `bootstrap.bin`, and composite `factory-*.bin` under
+`share/esp-wifi-loader/flash/<cpu>/`. `#firmware` provides just these files.
+The private key and signed packages are never inputs to that Nix build.
 
 - Install a first image: the web flasher (`web/`), or the files from a release with esptool.
 - Put your application in the loader's reach: sign it with `tools/sign.py`, then flash it from the

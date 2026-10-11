@@ -1,0 +1,9 @@
+# Small, independent signing image. No ESP-IDF, build tools, or application source.
+# podman build -f Dockerfile.sign -t esp-wifi-sign .
+# podman run --rm -v "$PWD/target/out:/input:ro" -v "$KEY:/key/key.pem:ro" \
+#   -v "$PWD/target/rel:/output" esp-wifi-sign --version 12 --fqdn owner/repo:latest
+FROM python:3.12-alpine
+RUN apk add --no-cache openssl
+WORKDIR /opt/esp-wifi-sign
+COPY tools/sign.py tools/wl_format.py tools/sign-bundle.py ./
+ENTRYPOINT ["python3", "/opt/esp-wifi-sign/sign-bundle.py"]

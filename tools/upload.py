@@ -3,14 +3,22 @@
 
   upload.py discover [--iface wlan0] [--seconds 10]
   upload.py send PACKAGE --host fe80::1%wlan0 [--port 5227] [--dry]
+  upload.py send PACKAGE --host 192.168.4.1 --port 5228 [--adb SERIAL]   # an application's upload port (IPv4 too)
   upload.py reboot --host fe80::1%wlan0
+
+An application that links the loader's upload code (esp-modules `main`, port 5228) takes the same bytes, so this one
+tool also sends modules and applications to it: any host address, `--port`, and `--adb SERIAL` to go through an Android
+phone that is attached with adb and joined to the device's network (its `nc` carries the bytes) when the computer has
+no Wi-Fi of its own.
 
 A Linux host runs the flasher access point (hostapd, WPA2, SSID DIRECT-xy-flash) and shares no
 internet with it. See docs/protocol.md.
 """
 import argparse
+import os
 import socket
 import struct
+import subprocess
 import sys
 import time
 
@@ -72,11 +80,34 @@ def _read_status(sock):
     return buf.decode() or "ERR no-reply"
 
 
+ADB = os.environ.get("ADB", "adb")
+
+
+def adb_nc(serial, host, port, data: bytes, udp=False, wait=3, timeout=60):
+    """Send `data` through the phone's netcat and return what the device answered. TCP ends when the device closes
+    (it does after its verdict); UDP has no end, so the phone's `timeout` stops it after `wait` seconds."""
+    nc = f"nc {'-u ' if udp else ''}-w {wait} {host} {port}"
+    cmd = [ADB, "-s", serial, "shell", f"timeout {wait + 1} {nc}" if udp else nc]
+    try:
+        r = subprocess.run(cmd, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+        return r.stdout
+    except subprocess.TimeoutExpired as e:
+        return e.stdout or b""
+
+
+def send_adb(serial, host, port, body: bytes, dry=False, reboot=False):
+    out = adb_nc(serial, host, port, wf.transport_header(dry=dry, reboot=reboot) + body, wait=20, timeout=120)
+    lines = [l for l in out.decode(errors="replace").replace("\r", "").split("\n") if l]
+    for l in lines:
+        if not l.startswith("P "):
+            print(l, flush=True)
+    return next((l for l in reversed(lines) if l.startswith(("OK", "ERR"))), "ERR no-reply")
+
+
 def send(host, port, body: bytes, dry=False, reboot=False):
-    infos = socket.getaddrinfo(host, port, socket.AF_INET6, socket.SOCK_STREAM)
-    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    """Any address family: `fe80::1%wlan0` (the loader), `192.168.4.1` or a name (an application)."""
+    sock = socket.create_connection((host, port), timeout=30)
     sock.settimeout(30)
-    sock.connect(infos[0][4])
     sock.sendall(wf.transport_header(dry=dry, reboot=reboot) + body)
     sock.shutdown(socket.SHUT_WR)  # the client FIN ends the upload
     status = _read_status(sock)
@@ -90,6 +121,7 @@ def main():
     d = sub.add_parser("discover"); d.add_argument("--iface"); d.add_argument("--seconds", type=int, default=10)
     s = sub.add_parser("send"); s.add_argument("package"); s.add_argument("--host", required=True)
     s.add_argument("--port", type=int, default=PORT); s.add_argument("--dry", action="store_true")
+    s.add_argument("--adb", metavar="SERIAL", help="go through this phone's netcat")
     r = sub.add_parser("reboot"); r.add_argument("--host", required=True); r.add_argument("--port", type=int, default=PORT)
     a = ap.parse_args()
     if a.cmd == "discover":
@@ -97,7 +129,8 @@ def main():
         return 0
     if a.cmd == "send":
         with open(a.package, "rb") as f:
-            status = send(a.host, a.port, f.read(), dry=a.dry)
+            status = (send_adb(a.adb, a.host, a.port, f.read(), dry=a.dry) if a.adb
+                      else send(a.host, a.port, f.read(), dry=a.dry))
     else:
         status = send(a.host, a.port, b"", reboot=True)
     return 0 if status.startswith("OK") else 1
