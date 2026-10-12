@@ -45,25 +45,6 @@ class Tools(unittest.TestCase):
         self.assertEqual(d.upload(self.pkg(key=self.k2, version=6)), "ERR 8 key-mismatch")
         self.assertTrue(d.upload(self.pkg(version=6)).startswith("OK"))
 
-    def test_trust_anchor_replaces_tofu(self):
-        d = Device(anchor=sign.public_key(self.k1))
-        self.assertEqual(d.upload(self.pkg(key=self.k2)), "ERR 8 key-mismatch")
-        self.assertTrue(d.upload(self.pkg()).startswith("OK"))
-        self.assertIsNone(d.pin)
-
-    def test_trust_slot_in_the_stage2_image(self):
-        pub = sign.public_key(self.k1)
-        boot = os.urandom(19584)
-        for offset in (0, 0x1000):
-            img = wf.embed_trust_key(boot, offset, pub)
-            self.assertEqual(len(img), wf.TRUST_OFFSET - offset + wf.TRUST_SIZE)
-            self.assertEqual(img[:len(boot)], boot)
-            self.assertEqual(wf.parse_trust_slot(img[wf.TRUST_OFFSET - offset:]), pub)
-            self.assertLessEqual(offset + len(img), wf.STAGE2_REGION_END)
-        self.assertIsNone(wf.parse_trust_slot(b"\xff" * 256))
-        with self.assertRaises(ValueError):
-            wf.embed_trust_key(b"\0" * 0x7000, 0, pub)
-
     def test_rollback_and_chip(self):
         d = Device()
         d.upload(self.pkg(version=5))

@@ -23,7 +23,25 @@
 #define ERASE_BLOCK 65536u
 #define TABLE_ENTRY 8u
 
-static uint8_t head[SECTOR], body[SECTOR];
+static const esp_wifi_loader_module_sink_t *module_sink;
+
+void esp_wifi_loader_set_module_sink(const esp_wifi_loader_module_sink_t *sink) { module_sink = sink; }
+
+/* Reason text of a code the module sink may return (the numbers of docs/protocol.md). */
+static const char *sink_reason(int code)
+{
+    switch (code) {
+    case WL_ERR_BAD_LENGTH: return "bad-length";
+    case WL_ERR_BAD_IMAGE_HEADER: return "bad-image-header";
+    case WL_ERR_FLASH: return "flash-write";
+    case WL_ERR_ROLLBACK: return "rollback";
+    case WL_ERR_WRONG_TARGET: return "wrong-chip-or-target";
+    case WL_ERR_NO_MEMORY: return "no-memory";
+    case WL_ERR_UNKNOWN_MODULE: return "unknown-module";
+    case WL_ERR_BUSY: return "busy";
+    default: return "refused";
+    }
+}
 
 static esp_err_t fl_erase(const wl_region_t *r, uint32_t off, size_t len)
 {
@@ -97,7 +115,7 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
 {
     uint8_t t[16], pub[WL_PUBKEY_SIZE], sig[64];
     wl_header_t hdr;
-    uint8_t *table = NULL;
+    uint8_t *table = NULL, *head = NULL, *body = NULL, fin;
     char line[160];
     int code = 6;
     const char *reason = "short-read-or-timeout";
@@ -107,6 +125,7 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
     wl_upload_result_t result = WL_UPLOAD_NONE;
     wl_sha256_ctx_t *whole = NULL;
     wl_region_t region = {0};
+    bool sink_open = false, sink_begun = false, committed = false;
 
     if (!read_exact(fd, t, sizeof(t))) goto fail;
     code = 1; reason = "bad-header";
@@ -121,7 +140,7 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
         goto fail;
 #endif
         code = 6; reason = "expected-fin";
-        if (recv(fd, body, 1, 0) != 0) goto fail;
+        if (recv(fd, &fin, 1, 0) != 0) goto fail;
         return send_all(fd, "OK 0\n") ? WL_UPLOAD_REBOOT : WL_UPLOAD_NONE;
     }
 
@@ -132,32 +151,25 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
     code = 7; reason = "bad-signature";
     if (hdr.magic != WL_MAGIC || !verify_signature(pub, sig, &hdr)) goto fail;
     const wl_state_view_t *v = &ctx->state->view;
+    /* One key: the first one seen is pinned (trust on first use) and signs everything this loader updates
+     * over Wi-Fi - Main, the loader, Stage2 and modules. */
     code = 8; reason = "key-mismatch";
-    /* The key in the Stage2 region (the loader key), when there is one, is the only one that may sign the
-     * loader and Stage2. Main and modules are signed by whatever key the user chose: the first one seen is
-     * pinned (trust on first use), and the loader key is accepted for them too, as that is how a
-     * recovery image ("loader as Main") is installed. Without a Stage2 key every target is pinned. */
-    uint8_t anchor[WL_PUBKEY_SIZE];
-    bool has_anchor = wl_trust_key(anchor);
-    bool anchor_signed = has_anchor && memcmp(anchor, pub, sizeof(pub)) == 0;
-    bool boot_target = hdr.target == WL_TARGET_LOADER || hdr.target == WL_TARGET_STAGE2;
-    if (boot_target && has_anchor && !anchor_signed) goto fail;
-    if (!anchor_signed && v->has_pin && memcmp(v->pin, pub, sizeof(pub))) goto fail;
+    if (v->has_pin && memcmp(v->pin, pub, sizeof(pub))) goto fail;
 #if CONFIG_WL_MODE_LIBRARY
     /* No trust on first use inside an application: the first sender on its network would pin their own
-     * key. The key has to be the loader key or pinned already (by the loader's first install). */
+     * key. The loader's first install of Main pins it, and this is refused until then. */
     reason = "no-pinned-key";
-    if (!anchor_signed && !v->has_pin) goto fail;
+    if (!v->has_pin) goto fail;
 #endif
     code = 9; reason = "rollback";
-    /* The loader key's Main image is the recovery path: it neither checks nor raises the Main version. */
-    bool main_versioned = hdr.target == WL_TARGET_MAIN && !anchor_signed;
-    {
+    /* Modules keep their own versions (the sink checks them). */
+    const esp_wifi_loader_module_sink_t *sink = hdr.target == WL_TARGET_MODULE ? module_sink : NULL;
+    if (hdr.target != WL_TARGET_MODULE) {
         bool has = hdr.target == WL_TARGET_MAIN ? v->has_minver
                  : hdr.target == WL_TARGET_LOADER ? v->has_minver_loader : v->has_minver_stage2;
         uint32_t min = hdr.target == WL_TARGET_MAIN ? v->minver
                      : hdr.target == WL_TARGET_LOADER ? v->minver_loader : v->minver_stage2;
-        if (has && hdr.version < min && (hdr.target != WL_TARGET_MAIN || main_versioned)) goto fail;
+        if (has && hdr.version < min) goto fail;
     }
     /* A signed Main header with no image is a request to reboot into the loader. Only
      * where Main itself is running (bootstrap/library): the loader has nothing to reboot to. */
@@ -167,12 +179,22 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
 #endif
     code = 10; reason = "wrong-chip-or-target";
     if (hdr.format != WL_FORMAT || hdr.cpu != CONFIG_IDF_FIRMWARE_CHIP_ID ||
-        (!manifest && !wl_target_region(hdr.target, &region))) goto fail;
+        (!manifest && !sink && !wl_target_region(hdr.target, &region))) goto fail;
+    char name[sizeof(hdr.fqdn) + 1] = {0};
+    if (sink) {   /* a module: the name of its slot is in the name field of the header */
+        code = 15; reason = "unknown-module";
+        if (hdr.fqdn_len == 0 || hdr.fqdn_len >= sizeof(hdr.fqdn)) goto fail;
+        memcpy(name, hdr.fqdn, hdr.fqdn_len);
+        region.size = UINT32_MAX;
+        int rc = sink->open(sink->arg, name, hdr.version, hdr.image_size, dry);
+        if (rc) { code = rc; reason = sink_reason(rc); goto fail; }
+        sink_open = true;
+    }
     if (manifest) {
         code = 3; reason = "bad-length";
         if (hdr.block_count != 0) goto fail;
         code = 6; reason = "expected-fin";
-        if (recv(fd, body, 1, 0) != 0) goto fail;
+        if (recv(fd, &fin, 1, 0) != 0) goto fail;
         snprintf(line, sizeof(line), "OK 0 request-loader%s\n", dry ? " dry" : "");
         printf("wl: %s", line);
         if (send_all(fd, line) && !dry) {
@@ -182,7 +204,7 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
         goto cleanup;
     }
     code = 3; reason = "bad-length";
-    if (hdr.image_size < SECTOR || hdr.image_size > region.size ||
+    if ((sink ? hdr.image_size == 0 : hdr.image_size < SECTOR) || hdr.image_size > region.size ||
         hdr.block_size != WL_BLOCK ||
         hdr.block_count != (hdr.image_size + WL_BLOCK - 1) / WL_BLOCK ||
         hdr.fqdn_len > sizeof(hdr.fqdn)) goto fail;
@@ -198,19 +220,36 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
     if (!sha256(table, table_len, hash) || memcmp(hash, hdr.table_sha256, 32)) goto fail;
 
     /* ---- stream the image ---- */
+    /* A module may be shorter than one block; everything else is at least one. */
+    const size_t head_len = hdr.image_size < SECTOR ? hdr.image_size : SECTOR;
+    /* Transfer buffers live on the heap only for the duration of an upload (rare); nothing is
+     * reserved in RAM between uploads. */
+    code = 11; reason = "no-memory";
+    head = malloc(2 * SECTOR);
+    if (!head) goto fail;
+    body = head + SECTOR;
     code = 6; reason = "short-read-or-timeout";
-    if (!read_exact(fd, head, SECTOR)) goto fail;
-    const esp_image_header_t *image = (const esp_image_header_t *)head;
-    code = 4; reason = "bad-image-header";
-    if (image->magic != ESP_IMAGE_HEADER_MAGIC || image->chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID) goto fail;
+    if (!read_exact(fd, head, head_len)) goto fail;
     code = 13; reason = "bad-block";
-    if (!sha256(head, SECTOR, hash) || memcmp(hash, table, TABLE_ENTRY)) goto fail;
+    if (!sha256(head, head_len, hash) || memcmp(hash, table, TABLE_ENTRY)) goto fail;
+    if (sink) {
+        int rc = sink->head(sink->arg, head, head_len);   /* the module's own header, before any erase */
+        if (rc) { code = rc; reason = sink_reason(rc); goto fail; }
+    } else {
+        const esp_image_header_t *image = (const esp_image_header_t *)head;
+        code = 4; reason = "bad-image-header";
+        if (image->magic != ESP_IMAGE_HEADER_MAGIC || image->chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID) goto fail;
+    }
     code = 11; reason = "hash-init";
     whole = wl_sha256_new();
-    if (!whole || !wl_sha256_update(whole, head, SECTOR)) goto fail;
+    if (!whole || !wl_sha256_update(whole, head, head_len)) goto fail;
 
     code = 5; reason = "flash-erase";
-    if (!dry) {
+    if (!dry && sink) {
+        int rc = sink->begin(sink->arg);   /* stops the module and invalidates its slot */
+        if (rc) { code = rc; reason = sink_reason(rc); goto fail; }
+        sink_begun = true;
+    } else if (!dry) {
         int64_t tm = now_ms();
         /* At most one block, and never past the image: the Stage2 region is
          * only 28 KiB and ends at the partition table. */
@@ -220,7 +259,7 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
         erase_ms += now_ms() - tm;
         if (hdr.target == WL_TARGET_MAIN) ctx->main_present = false;
     }
-    offset = SECTOR;
+    offset = head_len;
     while (offset < hdr.image_size) {
         size_t n = hdr.image_size - offset < SECTOR ? hdr.image_size - offset : SECTOR;
         code = 6; reason = "short-read-or-timeout";
@@ -231,7 +270,12 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
         if (!sha256(body, n, hash) ||
             memcmp(hash, table + (size_t)(offset / SECTOR) * TABLE_ENTRY, TABLE_ENTRY)) goto fail;
         if (!wl_sha256_update(whole, body, n)) goto fail;
-        if (!dry) {
+        if (!dry && sink) {
+            int64_t tm = now_ms();
+            int rc = sink->write(sink->arg, offset, body, n);
+            if (rc) { code = rc; reason = sink_reason(rc); goto fail; }
+            write_ms += now_ms() - tm;
+        } else if (!dry) {
             if (offset % ERASE_BLOCK == 0) {
                 size_t extent = hdr.image_size - offset < ERASE_BLOCK
                                     ? (hdr.image_size - offset + SECTOR - 1) / SECTOR * SECTOR
@@ -249,7 +293,7 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
         offset += n;
         if (offset % ERASE_BLOCK == 0 || offset == hdr.image_size) {
             snprintf(line, sizeof(line), "P %lu %lu\n", (unsigned long)offset,
-                     (unsigned long)(dry ? 0 : offset - SECTOR));
+                     (unsigned long)(dry ? 0 : offset - head_len));
             if (!send_all(fd, line)) goto cleanup;
         }
     }
@@ -260,7 +304,7 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
     if (memcmp(hash, hdr.image_sha256, 32)) goto fail;
 
     code = 6; reason = "expected-fin";
-    if (recv(fd, body, 1, 0) != 0) goto fail;
+    if (recv(fd, &fin, 1, 0) != 0) goto fail;
 
     if (!dry) {
         /* State first, head sector last: if the key or the minimum version cannot be saved the install
@@ -269,16 +313,22 @@ wl_upload_result_t wl_upload(int fd, wl_upload_ctx_t *ctx)
          * reinstall of the same version satisfies.) */
         code = 5; reason = "state-write";
         uint32_t ver = hdr.version;
-        if (!anchor_signed && !ctx->state->view.has_pin && wl_state_append(ctx->state, WL_REC_PIN, pub, sizeof(pub))) goto fail;
-        uint8_t rec = hdr.target == WL_TARGET_MAIN ? WL_REC_MINVER
-                    : hdr.target == WL_TARGET_LOADER ? WL_REC_MINVER_LOADER : WL_REC_MINVER_STAGE2;
-        if ((hdr.target != WL_TARGET_MAIN || main_versioned) && wl_state_append(ctx->state, rec, &ver, sizeof(ver))) goto fail;
-        if (hdr.target == WL_TARGET_MAIN && wl_state_append(ctx->state, WL_REC_HEADER, &hdr, sizeof(hdr))) goto fail;
+        if (!ctx->state->view.has_pin && wl_state_append(ctx->state, WL_REC_PIN, pub, sizeof(pub))) goto fail;
+        if (!sink) {
+            uint8_t rec = hdr.target == WL_TARGET_MAIN ? WL_REC_MINVER
+                        : hdr.target == WL_TARGET_LOADER ? WL_REC_MINVER_LOADER : WL_REC_MINVER_STAGE2;
+            if (wl_state_append(ctx->state, rec, &ver, sizeof(ver))) goto fail;
+            if (hdr.target == WL_TARGET_MAIN && wl_state_append(ctx->state, WL_REC_HEADER, &hdr, sizeof(hdr))) goto fail;
+        }
         int64_t tm = now_ms();
         code = 5; reason = "head-commit";
-        if (fl_write(&region, 0, head, SECTOR) != ESP_OK) goto fail;
+        if (sink) {
+            int rc = sink->commit(sink->arg, head, head_len);   /* version first, head sector last */
+            if (rc) { code = rc; reason = sink_reason(rc); goto fail; }
+        } else if (fl_write(&region, 0, head, SECTOR) != ESP_OK) goto fail;
         write_ms += now_ms() - tm;
         if (hdr.target == WL_TARGET_MAIN) ctx->main_present = true;
+        committed = true;
     }
     snprintf(line, sizeof(line), "OK %lu ms=%lld erase_ms=%lld write_ms=%lld%s\n",
              (unsigned long)hdr.image_size, (long long)(now_ms() - start), (long long)erase_ms,
@@ -291,7 +341,9 @@ fail:
     printf("wl: %s", line);
     send_all(fd, line);
 cleanup:
+    if (sink_open && sink->done) sink->done(sink->arg, committed, sink_begun);   /* after the reply: restart what was stopped */
     wl_sha256_free(whole);
     free(table);
+    free(head);
     return result;
 }

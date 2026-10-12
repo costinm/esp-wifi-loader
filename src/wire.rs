@@ -13,18 +13,6 @@ pub const FORMAT: u8 = 1;
 pub const TRANSPORT_SIZE: usize = 16;
 pub const PUBKEY_SIZE: usize = 65;
 
-/// Flash offset (the same on every chip) and size of the trust slot in the Stage2 region: the public key that
-/// signs every package. See `tools/wl_format.py`; an erased slot means no anchor (pin the first key seen).
-pub const TRUST_OFFSET: u32 = 0x6F00;
-pub const TRUST_SIZE: usize = 256;
-
-/// The key in a trust slot read from flash, or None when the slot is erased or malformed.
-pub fn parse_trust_slot(slot: &[u8]) -> Option<[u8; PUBKEY_SIZE]> {
-    if slot.len() < 8 + PUBKEY_SIZE || &slot[..4] != b"WLK1" || slot[4] as usize != PUBKEY_SIZE || slot[8] != 4 {
-        return None;
-    }
-    slot[8..8 + PUBKEY_SIZE].try_into().ok()
-}
 pub const SIG_SIZE: usize = 64;
 pub const HEADER_SIZE: usize = 216;
 pub const BLOCK: usize = 4096;

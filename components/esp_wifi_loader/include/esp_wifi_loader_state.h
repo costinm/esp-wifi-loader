@@ -56,14 +56,6 @@ typedef struct {
 } wl_state_t;
 
 /* Scan the sectors. Returns 0 even when blank. */
-/* Trust slot: the public key that signs every package, kept in the Stage2 region of flash at a fixed
- * offset (tools/wl_format.py embeds it at build time). Erased flash means no anchor: the first key seen is
- * pinned instead. Layout: "WLK1" | len u8 (65) | 3 pad | key[65] | 0xFF fill. */
-#define WL_TRUST_OFFSET 0x6F00u
-#define WL_TRUST_SIZE 256u
-/* Copies the key out of a slot image; false when erased or malformed. */
-bool wl_trust_parse(const uint8_t slot[WL_TRUST_SIZE], uint8_t key[WL_PUBKEY_SIZE]);
-
 int wl_state_open(wl_state_t *st, const wl_flash_ops_t *ops);
 /* Append one record, compacting into the other sector when needed. */
 int wl_state_append(wl_state_t *st, uint8_t type, const void *data, size_t len);

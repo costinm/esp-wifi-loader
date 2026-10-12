@@ -5,7 +5,7 @@
 #
 # Without --key a new P-256 key is generated: recommended, because the app's signing certificate is its identity for
 # every future update (a phone refuses an update signed by another certificate) and is unrelated to the firmware
-# signing keys. Any PEM key can be used, the loader key included (APK signature schemes v2+ accept ECDSA P-256),
+# signing keys. Any PEM key can be used, the firmware key included (APK signature schemes v2+ accept ECDSA P-256),
 # but then one leaked secret compromises both.
 # Writes OUT_DIR/android.p12 (alias "flasher", self-signed certificate valid for 100 years) and android.pass, and
 # prints the commands that store them as GitHub secrets. Keep the files; never commit them.

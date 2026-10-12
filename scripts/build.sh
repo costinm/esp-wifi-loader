@@ -50,11 +50,7 @@ for cpu in $CPUS; do
         IDF_TARGET=$cpu idf.py -C "$ROOT/boot" -B "$out/stage2-$size-build" \
             -D SDKCONFIG="$out/stage2-$size.sdkconfig.gen" -D SDKCONFIG_DEFAULTS="$cfg" build
         boot_off=0x0; [[ $cpu == esp32 ]] && boot_off=0x1000
-        # The loader key goes into the Stage2 image at a fixed offset (tools/wl_format.py TRUST_OFFSET):
-        # the trust anchor of the loader and of Main. WL_PUBKEY=none builds without one (first key seen is pinned);
-        # WL_PUBKEY=FILE uses another key, for example a bench key.
-        python3 "$ROOT/tools/sign.py" embed-key --pub "${WL_PUBKEY:-$ROOT/keys/loader.pub}" --boot-offset "$boot_off" \
-            "$out/stage2-$size-build/bootloader/bootloader.bin" "$out/stage2-$size.bin"
+        cp "$out/stage2-$size-build/bootloader/bootloader.bin" "$out/stage2-$size.bin"
         cp "$out/stage2-$size-build/partition_table/partition-table.bin" "$out/partition-table-$size.bin"
         # One image for a blank board: stage2 + table + loader merged at offset 0.
         python -m esptool --chip "$cpu" merge-bin -o "$out/factory-$size.bin" \

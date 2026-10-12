@@ -67,7 +67,7 @@ jobs:
           (cd rel && sha256sum *.bin > SHA256SUMS)
       - uses: softprops/action-gh-release@v2
         with: {files: "rel/*"}
-  # Signs the images with the loader key and publishes them, with the Android app, as the rolling `latest` release,
+  # Signs the images with the release key and publishes them, with the Android app, as the rolling `latest` release,
   # which the app downloads (https://github.com/costinm/esp-wifi-loader/releases/download/latest/<chip>.wlpkg; short
   # form costinm/esp-wifi-loader:latest). Needs the repository secret WL_SIGNING_KEY (docs/building.md, "Whose key
   # signs what"). The logic is in scripts/publish-release.sh and scripts/publish-latest.sh: run them locally to test.

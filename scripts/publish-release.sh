@@ -3,8 +3,9 @@
 #   WL_SIGNING_KEY=<PEM text>  scripts/publish-release.sh            # CI: the key from a secret
 #   scripts/publish-release.sh KEY.pem                               # locally
 # Needs target/out/<cpu>/*.bin (scripts/build.sh) and optionally APK=<file> (scripts/android-release.sh).
-# The key must be the one whose public half is keys/loader.pub: it is embedded in every Stage2 built here, and a
-# device only takes a loader or Stage2 signed with it. Prints version=<yymmddHHMM> (also written to $GITHUB_ENV).
+# The key must be the one whose public half is keys/loader.pub (what users check releases against; nothing is built with
+# it). A device pins the first key it is given, then takes everything over Wi-Fi - Main, loader, Stage2, modules - only from
+# that key. Prints version=<yymmddHHMM> (also written to $GITHUB_ENV).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REL="${REL:-$ROOT/target/rel}"

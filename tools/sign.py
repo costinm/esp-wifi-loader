@@ -100,24 +100,11 @@ def main():
     i = sub.add_parser("info"); i.add_argument("package")
     pk = sub.add_parser("pubkey", help="print the public key of a private key as 130 hex digits")
     pk.add_argument("key")
-    e = sub.add_parser("embed-key", help="put a public key into a Stage2 image at the fixed trust-slot offset")
-    e.add_argument("--pub", required=True, help="file with the public key as hex (tools/sign.py pubkey), or 'none'")
-    e.add_argument("--boot-offset", default="0", help="flash offset the bootloader is written at (0x1000 on ESP32)")
-    e.add_argument("image"); e.add_argument("out")
     a = ap.parse_args()
     if a.cmd == "keygen":
         keygen(a.key)
     elif a.cmd == "pubkey":
         print(public_key(a.key).hex())
-    elif a.cmd == "embed-key":
-        with open(a.image, "rb") as f:
-            image = f.read()
-        if a.pub != "none":
-            with open(a.pub) as f:
-                image = wf.embed_trust_key(image, int(a.boot_offset, 0), bytes.fromhex(f.read().strip()))
-        with open(a.out, "wb") as f:
-            f.write(image)
-        print(f"wrote {a.out}: {len(image)} bytes" + ("" if a.pub != "none" else " (no trust key)"))
     elif a.cmd == "sign":
         if a.request_loader:
             image, a.target = b"", "main"

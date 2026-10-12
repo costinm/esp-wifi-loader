@@ -15,12 +15,12 @@
 #include "wl_crypto.h"
 #include "internal.h"
 
-#define WL_VERSION 1
 #if CONFIG_WL_MODE_BOOTSTRAP
 #define ANNOUNCE_BOOTSTRAP 1
 #else
 #define ANNOUNCE_BOOTSTRAP 0
 #endif
+#define WL_VERSION 1
 #define ANNOUNCE_PERIOD_MS 5000
 
 static const char *TAG = "wl";
@@ -50,56 +50,15 @@ static bool idle_exit_allowed(const wl_upload_ctx_t *ctx)
 #endif
 }
 
-static void announce(int udp, unsigned iface, const wl_upload_ctx_t *ctx, bool blank)
-{
-    struct sockaddr_in6 to = {.sin6_family = AF_INET6, .sin6_port = htons(CONFIG_WL_PORT),
-                              .sin6_scope_id = iface};
-    inet_pton(AF_INET6, CONFIG_WL_ANNOUNCE_GROUP, &to.sin6_addr);
-    setsockopt(udp, IPPROTO_IPV6, IPV6_MULTICAST_IF, &iface, sizeof(iface));
-
-    const wl_state_view_t *v = &ctx->state->view;
-    const char *state = blank ? "blank" : (ANNOUNCE_BOOTSTRAP || WL_RTC_REASON == WL_REASON_UPDATE) ? "update" : "crash";
-    uint32_t version = 0;
-    char key[9] = "none", anchor_fp[9] = "none", fqdn[129] = "";
-    if (v->has_header) {
-        const wl_header_t *h = (const wl_header_t *)v->header;
-        version = h->version;
-        size_t n = h->fqdn_len < sizeof(h->fqdn) ? h->fqdn_len : sizeof(h->fqdn);
-        memcpy(fqdn, h->fqdn, n);
-        fqdn[n] = 0;
-    }
-    uint8_t anchor[WL_PUBKEY_SIZE];
-    bool has_anchor = wl_trust_key(anchor);
-    /* key= is the pinned Main key, anchor= the loader key from the Stage2 region: the loader key signs the
-     * loader and Stage2, the pinned key (trust on first use) signs Main and modules. */
-    uint8_t hash[32];
-    if (v->has_pin && wl_sha256(v->pin, WL_PUBKEY_SIZE, hash)) {
-        snprintf(key, sizeof(key), "%02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
-    }
-    if (has_anchor && wl_sha256(anchor, WL_PUBKEY_SIZE, hash)) {
-        snprintf(anchor_fp, sizeof(anchor_fp), "%02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
-    }
-    uint8_t mac[6];
-    wl_net_mac(mac);
-    char line[400];
-    int n = snprintf(line, sizeof(line),
-                     "esp-wifi-loader v=1 mode=" MODE_NAME " state=%s version=%lu key=%s anchor=%s fqdn=%s chip=%s "
-                     "mac=%02x:%02x:%02x:%02x:%02x:%02x port=%d role=%s loader=%d up=%lld\n",
-                     state, (unsigned long)version, key, anchor_fp, fqdn, CONFIG_IDF_TARGET,
-                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], CONFIG_WL_PORT,
-                     wl_net_role() == WL_ROLE_AP ? "ap" : "sta", WL_VERSION,
-                     (long long)(now_ms() / 1000));
-    sendto(udp, line, n, 0, (struct sockaddr *)&to, sizeof(to));
-}
-
 esp_err_t esp_wifi_loader_run(void)
 {
-    ESP_ERROR_CHECK(esp_wifi_loader_init());
-    wl_upload_ctx_t *ctx = wl_ctx();
+    /* The loader is the whole application here, so it holds its session for as long as it runs. */
+    wl_upload_ctx_t *ctx = wl_ctx_open();
+    if (!ctx) return ESP_FAIL;
     ESP_LOGW(TAG, MODE_NAME " v%d main=%s reason=%u ", WL_VERSION, ctx->main_present ? "valid" : "blank",
              (unsigned)WL_RTC_REASON);
 
-    ESP_ERROR_CHECK(wl_net_init());
+    ESP_ERROR_CHECK(wl_net_init(NULL));
 
     int listener = socket(AF_INET6, SOCK_STREAM, 0), udp = socket(AF_INET6, SOCK_DGRAM, 0);
     if (listener < 0 || udp < 0) return ESP_FAIL;
@@ -122,7 +81,9 @@ esp_err_t esp_wifi_loader_run(void)
         int64_t next_announce = 0, next_scan = now_ms() + CONFIG_WL_SCAN_INTERVAL_S * 1000LL;
         while (wl_net_link_up()) {
             if (now_ms() >= next_announce) {
-                announce(udp, wl_net_ifindex(), ctx, !ANNOUNCE_BOOTSTRAP && !ctx->main_present);
+                wl_announce(udp, wl_net_ifindex(), ctx, MODE_NAME,
+                            (!ANNOUNCE_BOOTSTRAP && !ctx->main_present) ? "blank" :
+                            (ANNOUNCE_BOOTSTRAP || WL_RTC_REASON == WL_REASON_UPDATE) ? "update" : "crash", NULL);
                 next_announce = now_ms() + ANNOUNCE_PERIOD_MS;
             }
             /* While hosting, look for the flasher network between connections. */
@@ -143,7 +104,7 @@ esp_err_t esp_wifi_loader_run(void)
             setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
             setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
             /* A finished install or a loader request restarts the chip from inside. */
-            esp_wifi_loader_serve(fd);
+            wl_serve_ctx(fd, ctx);
             close(fd);
             /* No commit: keep serving; the scan timer resumes as before. */
             idle = now_ms() + CONFIG_WL_IDLE_TIMEOUT_S * 1000LL;

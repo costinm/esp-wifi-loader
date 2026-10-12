@@ -39,11 +39,6 @@ pub trait Platform {
     /// The slot number (0..[`crate::state::MODULE_SLOTS`]) of a module name, under which its minimum
     /// version is kept; None for an unknown name.
     fn module_slot(&self, name: &[u8]) -> Option<u8>;
-    /// The trust anchor read from the Stage2 region ([`wire::TRUST_OFFSET`], [`wire::parse_trust_slot`]):
-    /// the key that must sign every package. None: no anchor, the first key seen is pinned.
-    fn trusted_key(&self) -> Option<[u8; PUBKEY_SIZE]> {
-        None
-    }
 }
 
 /// What the caller does after [`Device::serve`] returned and the connection is closed.
@@ -134,27 +129,18 @@ impl<P: Platform, F: FlashOps> Device<P, F> {
         if !h.magic_ok() || !wire::verify_signature(&pubkey, &sig, &raw) {
             return Err(wire::BAD_SIGNATURE);
         }
-        // The loader key (the trust anchor in Stage2) is the only one that may sign the loader and Stage2.
-        // Main and modules are signed by the user's key (pinned on first use); the loader key is accepted
-        // for them too. Without an anchor every target is pinned.
-        let anchor = self.platform.trusted_key();
-        let anchor_signed = anchor.is_some_and(|key| key == pubkey);
-        if matches!(h.target, target::LOADER | target::STAGE2) && anchor.is_some() && !anchor_signed {
+        // One key signs everything: the first one seen is pinned (trust on first use).
+        if self.state.view.pin.is_some_and(|key| key != pubkey) {
             return Err(wire::KEY_MISMATCH);
         }
-        if !anchor_signed && self.state.view.pin.is_some_and(|key| key != pubkey) {
-            return Err(wire::KEY_MISMATCH);
-        }
-        if self.require_pin && !anchor_signed && self.state.view.pin.is_none() {
+        if self.require_pin && self.state.view.pin.is_none() {
             return Err(wire::NO_PINNED_KEY);
         }
         let slot = if h.target == target::MODULE { self.platform.module_slot(h.name()) } else { None };
         if h.target == target::MODULE && slot.is_none() {
             return Err(wire::WRONG_TARGET);
         }
-        if !(h.target == target::MAIN && anchor_signed)
-            && self.min_version(h.target, slot).is_some_and(|min| h.version < min)
-        {
+        if self.min_version(h.target, slot).is_some_and(|min| h.version < min) {
             return Err(wire::ROLLBACK);
         }
         if h.format != wire::FORMAT || h.cpu != self.platform.cpu() {
@@ -237,7 +223,7 @@ impl<P: Platform, F: FlashOps> Device<P, F> {
             // Commit. The state records come first and every failure is reported: an image must not
             // become bootable with its key or its rollback state unsaved. (A failed head write after
             // this leaves a raised minimum version, which reinstalling the same version satisfies.)
-            let saved = (anchor_signed || self.state.view.pin.is_some() || self.state.append(REC_PIN, &pubkey))
+            let saved = (self.state.view.pin.is_some() || self.state.append(REC_PIN, &pubkey))
                 && match h.target {
                     target::LOADER => self.state.append_u32(REC_MINVER_LOADER, h.version),
                     target::STAGE2 => self.state.append_u32(REC_MINVER_STAGE2, h.version),

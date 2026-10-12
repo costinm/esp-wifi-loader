@@ -109,16 +109,6 @@ int main(void)
             assert(st.view.minver == nv);
         }
     }
-    /* Trust slot as made by tools/sign.py embed-key */
-    {
-        uint8_t slot[WL_TRUST_SIZE], key[WL_PUBKEY_SIZE];
-        memset(slot, 0xff, sizeof(slot));
-        assert(!wl_trust_parse(slot, key)); /* erased: no anchor */
-        memcpy(slot, "WLK1", 4); slot[4] = 65; slot[5] = slot[6] = slot[7] = 0; slot[8] = 4; slot[9] = 0x77;
-        assert(wl_trust_parse(slot, key) && key[0] == 4 && key[1] == 0x77);
-        slot[8] = 3;
-        assert(!wl_trust_parse(slot, key)); /* not an uncompressed point */
-    }
     wl_state_erase_all(&st);
     wl_state_open(&st, &ops);
     assert(!st.view.has_pin);

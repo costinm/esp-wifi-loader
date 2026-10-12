@@ -27,9 +27,8 @@ def _verify(pub, sig, header):
 
 
 class Device:
-    def __init__(self, cpu="esp32c6", part_size=0x2d0000, mode="loader", anchor=None):
+    def __init__(self, cpu="esp32c6", part_size=0x2d0000, mode="loader"):
         self.mode = mode
-        self.anchor = anchor  # public key from the Stage2 trust slot, or None (trust on first use)
         self.minvers = {}
         self.cpu = wf.CHIPS[cpu]
         self.size = part_size
@@ -42,7 +41,7 @@ class Device:
         h = wf.unpack_header(hdr)
         if h["magic"] != wf.MAGIC or not _verify(pub, sig, hdr):
             return "ERR 7 bad-signature"
-        if (self.anchor or self.pin) and (self.anchor or self.pin) != pub:
+        if self.pin and self.pin != pub:
             return "ERR 8 key-mismatch"
         allowed = (1,) if self.mode == "loader" else (2, 3)
         manifest = self.mode != "loader" and h["target"] == 1 and h["image_size"] == 0
@@ -69,7 +68,7 @@ class Device:
         if hashlib.sha256(image).digest() != h["image_sha256"]:
             return "ERR 14 bad-image-hash"
         if not dry:
-            self.pin = self.pin or (None if self.anchor else pub)
+            self.pin = self.pin or pub
             self.minvers[h["target"]] = h["version"]
             self.minver = h["version"]
             self.written = getattr(self, "written", {})

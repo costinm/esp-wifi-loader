@@ -89,13 +89,6 @@ static bool scan_sector(wl_state_t *st, int idx, uint32_t *seq, wl_state_view_t 
     return true;
 }
 
-bool wl_trust_parse(const uint8_t slot[WL_TRUST_SIZE], uint8_t key[WL_PUBKEY_SIZE])
-{
-    if (memcmp(slot, "WLK1", 4) || slot[4] != WL_PUBKEY_SIZE || slot[8] != 4) return false;
-    memcpy(key, slot + 8, WL_PUBKEY_SIZE);
-    return true;
-}
-
 int wl_state_open(wl_state_t *st, const wl_flash_ops_t *ops)
 {
     memset(st, 0, sizeof(*st));
