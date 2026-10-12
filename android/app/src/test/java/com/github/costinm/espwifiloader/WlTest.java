@@ -56,12 +56,6 @@ public class WlTest {
         assertNotNull(p.refusal(Announce.parse(LINE.replace("version=0", "version=9")))); // downgrade
         assertNotNull(p.refusal(Announce.parse(LINE.replace("mode=loader", "mode=bootstrap"))));
         assertNull(Announce.parse("something else"));
-        // a device with a loader key (anchor) takes the loader and Stage2 only from it, but Main from the pinned
-        // or the first key, whatever the anchor is
-        String anchored = LINE.replace("key=none", "key=none anchor=deadbeef");
-        assertNull(p.refusal(Announce.parse(anchored)));                              // Main: nothing pinned yet
-        assertNotNull(p.refusal(Announce.parse(anchored.replace("key=none", "key=cafe0000"))));
-        assertNull(p.refusal(Announce.parse(anchored.replace("anchor=deadbeef", "anchor=" + p.keyFingerprint()))));
     }
 
     private static ServerSocket server() throws Exception {

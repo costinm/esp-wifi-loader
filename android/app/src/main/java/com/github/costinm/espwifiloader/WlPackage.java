@@ -58,17 +58,9 @@ public final class WlPackage {
         boolean ok = mainRuns ? (h.target == Wl.TARGET_LOADER || h.target == Wl.TARGET_STAGE2 || manifest)
                               : h.target == Wl.TARGET_MAIN && !manifest;
         if (!ok) return "device in " + a.mode() + " mode does not take target " + h.target;
-        // The loader key signs the loader and Stage2; Main and modules use the pinned key (the loader key is
-        // accepted for them as well: the recovery image).
+        // One key signs everything the device takes over Wi-Fi: the one it pinned, or the first one it is given.
         String fp = keyFingerprint();
-        boolean boot = h.target == Wl.TARGET_LOADER || h.target == Wl.TARGET_STAGE2;
-        boolean pinned = a.key().equals("none") || a.key().equals(fp);
-        boolean anchored = a.anchor().equals(fp);
-        if (boot && !a.anchor().equals("none")) {
-            if (!anchored) return "not signed by the device's loader key";
-        } else if (!pinned && !anchored) {
-            return "signed by a different key than the device pins";
-        }
+        if (!a.key().equals("none") && !a.key().equals(fp)) return "signed by a different key than the device pins";
         if (h.target == Wl.TARGET_MAIN && !manifest && h.version < a.version()) {
             return "older than the installed version " + a.version();
         }
