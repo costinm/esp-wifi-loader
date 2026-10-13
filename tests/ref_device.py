@@ -27,7 +27,7 @@ def _verify(pub, sig, header):
 
 
 class Device:
-    def __init__(self, cpu="esp32c6", part_size=0x2d0000, mode="loader"):
+    def __init__(self, cpu="esp32c6", part_size=0x290000, mode="loader"):
         self.mode = mode
         self.minvers = {}
         self.cpu = wf.CHIPS[cpu]

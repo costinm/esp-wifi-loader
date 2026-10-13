@@ -10,4 +10,4 @@ idf_component_register(
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "src"
     REQUIRES esp_wifi esp_netif esp_event esp_partition esp_timer lwip mbedtls
-             bootloader_support esp_system spi_flash)
+             bootloader_support esp_system spi_flash nvs_flash)

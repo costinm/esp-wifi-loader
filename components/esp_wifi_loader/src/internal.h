@@ -41,6 +41,7 @@ bool wl_net_join_flash(void);          /* scan, join the flasher network, wait f
 bool wl_net_host_rescue(void);         /* start ESP-RESCUE as AP, link-local only */
 bool wl_net_flash_visible(void);       /* scan while hosting */
 bool wl_net_link_up(void);
+int wl_net_scan(esp_wifi_loader_ap_t *aps, size_t max);   /* blocking scan: the count, strongest first; negative: the driver refused */
 wl_role_t wl_net_role(void);
 unsigned wl_net_ifindex(void);
 void wl_net_mac(uint8_t mac[6]);

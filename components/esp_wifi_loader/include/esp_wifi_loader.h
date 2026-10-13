@@ -77,6 +77,28 @@ esp_wifi_loader_result_t esp_wifi_loader_serve(int fd);
  * started, -6 no memory. The caller keeps the name; nothing is stored here. The radio is off after stop. */
 int esp_wifi_loader_wifi_start(const uint8_t *ssid, size_t ssid_len, const uint8_t *psk, size_t psk_len);
 void esp_wifi_loader_wifi_stop(void);
+/* The optional configured network, kept in NVS (namespace "wl"): the loader and the library join it when a scan sees it and the
+ * caller named none, and use the flasher network otherwise, so installs need no network of the user's. an empty `ssid`
+ * clears it; an empty `psk` is an open network. NVS must be initialised (the loader does it itself). 0, -1 too long, -3 NVS.
+ * `network_get` fills the name (empty: none) and says whether a passphrase is set; it returns 1 when a network is configured. */
+int esp_wifi_loader_network_set(const uint8_t *ssid, size_t ssid_len, const uint8_t *psk, size_t psk_len);
+int esp_wifi_loader_network_get(char ssid[33], int *has_psk);
+/* One access point seen by a scan. `auth` is the driver's wifi_auth_mode_t (0 open, 1 WEP, 2 WPA, 3 WPA2, 4 WPA/WPA2, 6 WPA3 ...). */
+typedef struct { uint8_t ssid[32]; uint8_t ssid_len; uint8_t bssid[6]; int8_t rssi; uint8_t channel; uint8_t auth; } esp_wifi_loader_ap_t;
+/* Scan for networks (hidden ones included), strongest first, without blocking the caller: the first call starts the scan in a task and
+ * returns -5; calls return -5 while it runs (a few seconds); the call that finds it done returns the count (up to `max` entries) or a
+ * negative code (-6 no memory, -7 the driver refused) and clears the result. -5 is also returned when a join is under way. The radio
+ * is switched on for the scan and off again when it was off. */
+int esp_wifi_loader_wifi_scan(esp_wifi_loader_ap_t *aps, size_t max);
+/* Fill the wifi_init_config_t `cfg` for esp_wifi_init: the build's defaults with the buffer counts from the device's NVS (namespace "wl": 16-bit `rx_static`,
+ * `rx_dynamic`, `tx_dynamic`, `rx_ba`). Use it from an application that initialises the driver itself, so every user of the
+ * radio on a device gets the same memory budget; set the values with esp_wifi_loader_nv (the console's `nv`). */
+void esp_wifi_loader_wifi_init_config(void *cfg);     /* a wifi_init_config_t * (esp_wifi.h) */
+/* The device's loader settings by name, for a console or a tool: "wifi.rx_static", "wifi.rx_dynamic", "wifi.tx_dynamic", "wifi.rx_ba"
+ * (decimal text; they apply at the next Wi-Fi start). `value` NULL reads: the text goes to `out` and its length is returned (-4 no
+ * such key or not set). Otherwise `value` is written (empty: back to the default). Returns the length read, 0 written, -1 bad argument
+ * or value, -3 NVS. */
+int esp_wifi_loader_nv(const char *key, size_t key_len, const uint8_t *value, size_t value_len, uint8_t *out, size_t cap);
 /* State: 0 off, 1 joining, 2 up; the name, address and signal are filled once up. Returns 0. */
 int esp_wifi_loader_wifi_status(int *state, char ssid[33], char ip[16], int *rssi);
 /* Library mode, upload server on request: accept uploads (esp_wifi_loader_serve) on CONFIG_WL_PORT, IPv6 and IPv4, and

@@ -6,7 +6,7 @@
   upload.py send PACKAGE --host 192.168.4.1 --port 5228 [--adb SERIAL]   # an application's upload port (IPv4 too)
   upload.py reboot --host fe80::1%wlan0
 
-An application that links the loader's upload code (esp-modules `main`, port 5228) takes the same bytes, so this one
+An application that links the loader's upload code (esp-xip-modules `main`, port 5228) takes the same bytes, so this one
 tool also sends modules and applications to it: any host address, `--port`, and `--adb SERIAL` to go through an Android
 phone that is attached with adb and joined to the device's network (its `nc` carries the bytes) when the computer has
 no Wi-Fi of its own.
