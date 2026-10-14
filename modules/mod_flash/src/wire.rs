@@ -110,6 +110,7 @@ pub(crate) const BAD_BLOCK: Reject = Reject::new(13, "bad-block");
 pub(crate) const BAD_IMAGE_HASH: Reject = Reject::new(14, "bad-image-hash");
 #[cfg(test)]
 pub(crate) const EXPECTED_FIN: Reject = Reject::new(6, "expected-fin");
+pub(crate) const CRYPTO: Reject = Reject::new(5, "crypto");
 pub(crate) const STATE_WRITE: Reject = Reject::new(5, "state-write");
 pub(crate) const NO_PINNED_KEY: Reject = Reject::new(8, "no-pinned-key");
 
@@ -241,6 +242,7 @@ pub(crate) fn block_table(image: &[u8]) -> Vec<u8> {
 }
 
 /// ECDSA P-256 over SHA-256(`msg`), signature as `r || s`, key as an uncompressed point.
+#[cfg(test)]
 pub(crate) fn verify_signature(
     pubkey: &[u8; PUBKEY_SIZE],
     sig: &[u8; SIG_SIZE],

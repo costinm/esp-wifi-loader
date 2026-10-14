@@ -125,7 +125,7 @@ impl<P: Platform, F: FlashOps> Device<P, F> {
     /// The application can instead drive Session from its shared socket poller.
     fn upload<S: Read + Write>(&mut self, s: &mut S) -> Result<Outcome, Reject> {
         let started = Instant::now();
-        let mut session = Session::new();
+        let mut session = Session::new(crate::psa_test::psa()).unwrap();
         let mut sink: Option<P::Sink> = None;
         let mut buf = [0u8; 1000];
         let mut offset = 0usize;

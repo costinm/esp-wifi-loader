@@ -92,6 +92,7 @@ impl Fake {
         h.size = core::mem::size_of_val(&h) as u32;
         h.user = (self as *mut Self).cast();
         h.now_ms = Some(now);
+        h.get_component = Some(crate::psa_test::get_component);
         h.flash_read = Some(read);
         h.flash_write = Some(write);
         h.flash_erase = Some(erase);

@@ -3,7 +3,9 @@
 This implements the verification and flash protocols as a `esp-xip-modules` 
 module. 
 
-It is `no_std` and depends on `espmod-abi`, `sha2` and `p256`. It does not
+It is `no_std`; its production dependency is `espmod-abi`. Hashing and P-256
+verification use the runtime PSA table. `sha2` and `p256` implement the test-only
+provider; the ABI crate's RustCrypto adapters are enabled for compatibility tests. It does not
 link ESP-IDF, FreeRTOS or the XIP host implementation.
 
 Build with the checked-in xip-modules harness:
@@ -103,3 +105,12 @@ TODO: we should add back the per-address rollback and support only 4k aligned in
 need to expose this to normal users, outside of debugging.
 
 TODO: fix the versioning, add a bit to manifest to request a reboot after.
+
+## Crypto API
+
+The public native table and RustCrypto-compatible imports are documented in
+[the runtime crypto guide](../../../esp-xip-modules/docs/crypto.md). There is one
+23-function C/Rust table, with native PSA names/signatures. The module's
+`src/crypto.rs` helpers are private and fallible so native backend errors become
+upload rejections. They are not a shared crypto API. Adapter tests use the actual
+RustCrypto Digest/Verifier traits backed by the same native-signature test table.

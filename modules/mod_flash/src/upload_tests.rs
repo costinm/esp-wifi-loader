@@ -49,7 +49,7 @@ fn signed_upload(image: &[u8]) -> (Vec<u8>, P) {
 fn partial_reads_pause_for_flash_and_commit_before_head() {
     let image: Vec<u8> = (0..(wire::BLOCK * 2 + 17)).map(|n| n as u8).collect();
     let (bytes, policy) = signed_upload(&image);
-    let mut session = Session::new();
+    let mut session = Session::new(crate::psa_test::psa()).unwrap();
     let mut at = 0;
     let mut writes = Vec::new();
     let mut opened = false;
@@ -113,7 +113,7 @@ fn partial_reads_pause_for_flash_and_commit_before_head() {
 fn bad_signature_rejected_before_flash_open() {
     let (mut bytes, policy) = signed_upload(&[5; wire::BLOCK]);
     bytes[wire::TRANSPORT_SIZE + 65] ^= 1;
-    let mut session = Session::new();
+    let mut session = Session::new(crate::psa_test::psa()).unwrap();
     let mut at = 0;
     while at < bytes.len() {
         match session.feed(&bytes[at..], &policy) {

@@ -4,7 +4,7 @@
 //! then resumes the session. The parser never owns a socket or a flash driver.
 //! It retains one 4 KiB block, the signed header and the block-hash table.
 use alloc::vec::Vec;
-use sha2::{Digest, Sha256};
+use crate::crypto::{Psa, Sha256};
 
 use crate::wire::{
     self, target, Header, Reject, Transport, BLOCK, HEADER_SIZE, PUBKEY_SIZE, SIG_SIZE, TABLE_ENTRY,
@@ -80,19 +80,15 @@ pub(crate) struct Session {
     table: Vec<u8>,
     head: Vec<u8>,
     block: Vec<u8>,
+    crypto: Psa,
     whole: Sha256,
     offset: usize,
     index: u32,
 }
 
-impl Default for Session {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 impl Session {
-    pub(crate) fn new() -> Self {
-        Self {
+    pub(crate) fn new(crypto: Psa) -> Result<Self, Reject> {
+        Ok(Self {
             phase: Phase::Transport,
             buf: Vec::new(),
             transport: None,
@@ -102,10 +98,11 @@ impl Session {
             table: Vec::new(),
             head: Vec::new(),
             block: Vec::new(),
-            whole: Sha256::new(),
+            crypto,
+            whole: crypto.sha256_stream().map_err(|_| wire::NO_MEMORY)?,
             offset: 0,
             index: 0,
-        }
+        })
     }
     fn header(&self) -> &Header {
         self.header.as_ref().expect("header phase")
@@ -126,7 +123,7 @@ impl Session {
     }
     #[inline(always)]
     fn validate<P: Policy>(&self, p: &P, h: &Header) -> Result<(), Reject> {
-        if !h.magic_ok() || !wire::verify_signature(&self.pubkey, &self.sig, &h.raw) {
+        if !h.magic_ok() || self.crypto.verify_p256_sha256(&self.pubkey, &self.sig, &h.raw).is_err() {
             return Err(wire::BAD_SIGNATURE);
         }
         if p.pinned_key().is_some_and(|key| key != self.pubkey) {
@@ -225,7 +222,7 @@ impl Session {
                     self.header = Some(h);
                 }
                 Phase::Table => {
-                    if Sha256::digest(&self.buf)[..] != self.header().table_sha256 {
+                    if self.crypto.sha256(&self.buf).map_err(|_| wire::CRYPTO)?[..] != self.header().table_sha256 {
                         return Err(wire::BAD_TABLE);
                     }
                     self.table = core::mem::take(&mut self.buf);
@@ -257,7 +254,7 @@ impl Session {
                     };
                     let want = &self.table[self.index as usize * TABLE_ENTRY
                         ..(self.index as usize + 1) * TABLE_ENTRY];
-                    if Sha256::digest(&self.buf)[..TABLE_ENTRY] != *want {
+                    if self.crypto.sha256(&self.buf).map_err(|_| wire::CRYPTO)?[..TABLE_ENTRY] != *want {
                         return Err(wire::BAD_BLOCK);
                     }
                     if self.index == 0
@@ -268,7 +265,7 @@ impl Session {
                     {
                         return Err(wire::BAD_IMAGE_HEADER);
                     }
-                    self.whole.update(&self.buf);
+                    self.whole.update(&self.buf).map_err(|_| wire::CRYPTO)?;
                     self.offset += self.buf.len();
                     if self.index == 0 {
                         core::mem::swap(&mut self.head, &mut self.buf);
@@ -354,7 +351,7 @@ impl Session {
             let h = self.header();
             (h.target, h.image_size, h.image_sha256)
         };
-        if self.whole.clone().finalize()[..] != image_sha256 {
+        if self.whole.finish().map_err(|_| wire::CRYPTO)?[..] != image_sha256 {
             return Err(wire::BAD_IMAGE_HASH);
         }
         if self.dry() {

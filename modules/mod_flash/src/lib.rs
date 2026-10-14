@@ -10,6 +10,7 @@ use core::ptr;
 mod rtc;
 mod state;
 mod upload;
+mod crypto;
 mod wire;
 // Retain the old blocking adapter only for protocol/interoperability tests.
 #[cfg(test)]
@@ -18,6 +19,8 @@ mod device;
 mod device_tests;
 #[cfg(test)]
 mod upload_tests;
+#[cfg(test)]
+mod psa_test;
 use state::{FlashOps, StateLog};
 use upload::{Action, Policy, Session};
 use wire::{target, Reject};
@@ -278,7 +281,7 @@ impl Connection {
         let l = layout(hw)?;
         Ok(Self {
             socket,
-            session: Session::new(),
+            session: Session::new(crate::crypto::Psa::from_host(hw).ok_or(wire::CRYPTO)?)?,
             log: StateLog::open(Journal {
                 hw,
                 base: l.loader + l.loader_size - 8192,

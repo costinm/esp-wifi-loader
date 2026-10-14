@@ -136,7 +136,9 @@ dependencies = [
 name = "espmod-abi"
 version = "0.1.0"
 dependencies = [
+ "digest",
  "mesh-api",
+ "p256",
 ]
 
 [[package]]
