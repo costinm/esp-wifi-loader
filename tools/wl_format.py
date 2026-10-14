@@ -9,7 +9,7 @@ HEADER = struct.Struct("<IBBBBIIHH32s32sB3x128s")
 assert HEADER.size == 216
 TRANSPORT_MAGIC = b"WLU1"
 CHIPS = {"esp32": 0, "esp32s3": 9, "esp32c6": 13}  # esp_chip_id_t
-TARGETS = {"main": 1, "loader": 2, "stage2": 3, "module": 4}
+TARGETS = {"main": 1, "loader": 2, "stage2": 3, "module": 4, "flash": 5}
 TARGET_MAIN = 1
 
 def block_table(image: bytes) -> bytes:

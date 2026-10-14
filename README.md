@@ -18,7 +18,7 @@ joins the ESP's flash network, gets images from the net or from storage, and act
 | `bootstrap/` | the same code built as Main: installs the loader and Stage2 (docs/bootstrap.md) |
 | `components/esp_wifi_loader/` | the shared code; an application can link it |
 | `android/` | the Android app: the flash station |
-| `src/`, `Cargo.toml` | the same protocol as a Rust crate, for firmware written in Rust (DMesh): wire format, signature check, state log, a one-connection server |
+| `modules/mod_flash/` | optional `no_std` Rust XIP module: signed uploads, signature checks and state log; uses host ABI primitives |
 | `tools/` | all the scripting, for the loader and for the applications built on it: `sign.py`, `sign-bundle.py` (sign a tree of images; `Dockerfile.sign`), `upload.py` (send a package to the loader or to an application's upload port, optionally through a phone's netcat), `provision.py` (put an application on a board with esptool and the flasher phone: backup, prepare, flash, verify), `reset.py` (reset a board, or make the five resets that start the loader) |
 | `web/` | GitHub Pages: install the first image from the browser |
 | `docs/` | design: `boot.md`, `protocol.md`, `app-integration.md`, `building.md` |

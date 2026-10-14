@@ -90,9 +90,11 @@ def main():
     s.add_argument("--cpu", required=True, choices=sorted(wf.CHIPS))
     s.add_argument("--version", required=True, type=int)
     s.add_argument("--target", choices=sorted(wf.TARGETS), default="main",
-                   help="main (loader mode), loader or stage2 (bootstrap mode), module (Rust Main: use --name)")
+                   help="main, loader/recovery, stage2, module (--name), or raw flash (--address)")
     s.add_argument("--fqdn", "--name", dest="fqdn", default="",
                    help="download host announced for Main updates; the module name for --target module")
+    s.add_argument("--address", type=lambda value: int(value, 0),
+                   help="physical flash address for --target flash")
     s.add_argument("--image", help="image to sign (not with --request-loader)")
     s.add_argument("--request-loader", action="store_true",
                    help="zero-length Main manifest: a Main running the component reboots into the loader")
@@ -113,6 +115,16 @@ def main():
                 image = f.read()
         else:
             ap.error("--image or --request-loader is required")
+        if a.target == "flash":
+            if a.address is None or not 0 <= a.address <= 0xffffffff:
+                ap.error("--target flash requires a 32-bit --address")
+            if a.fqdn:
+                ap.error("--target flash uses --address instead of --fqdn/--name")
+            if not image:
+                ap.error("--target flash requires a nonempty image")
+            a.fqdn = f"{a.address:08x}"
+        elif a.address is not None:
+            ap.error("--address requires --target flash")
         pkg = make_package(a.key, a.cpu, a.version, a.fqdn, image, a.target)
         with open(a.out, "wb") as f:
             f.write(pkg)

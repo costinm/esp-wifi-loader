@@ -13,7 +13,7 @@ if [[ $what == tools || $what == default || $what == all ]]; then
     target/test_state
 fi
 if [[ $what == rust || $what == default || $what == all ]]; then
-    cargo test --locked
+    cargo test --locked --manifest-path modules/mod_flash/Cargo.toml
 fi
 if [[ $what == android || $what == all ]]; then
     (cd android && ./gradlew :app:testDebugUnitTest)

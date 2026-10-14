@@ -1,0 +1,31 @@
+[package]
+name = "esp-mod-flash"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+[package.metadata]
+mkmod = "--slot flash --stack 12288 --state 32 --features SOCKET,FLASH,PACKETS,MEMORY,MODULES --autostart"
+[workspace]
+[dependencies]
+sha2 = { version = "0.10", default-features = false }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+espmod-abi = { path = "../../../esp-xip-modules/crates/espmod-abi" }
+[dev-dependencies]
+p256 = { version = "0.13", features = ["ecdsa"] }
+[features]
+flat-image = ["espmod-abi/global-alloc"]
+esp32 = []
+esp32s3 = []
+esp32c6 = []
+[lib]
+crate-type = ["rlib"]
+[[bin]]
+name = "mod_flash"
+required-features = ["flat-image"]
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = "symbols"

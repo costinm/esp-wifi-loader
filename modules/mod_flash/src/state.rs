@@ -9,19 +9,20 @@
 
 use crate::wire::{HEADER_SIZE, PUBKEY_SIZE};
 
-pub const SECTOR: u32 = 4096;
+pub(crate) const SECTOR: u32 = 4096;
 /// Both sectors.
-pub const SIZE: u32 = 2 * SECTOR;
+#[cfg(test)]
+pub(crate) const SIZE: u32 = 2 * SECTOR;
 
-pub const REC_PIN: u8 = 1;
-pub const REC_MINVER: u8 = 2;
-pub const REC_HEADER: u8 = 3;
-pub const REC_QIO: u8 = 4;
-pub const REC_MINVER_LOADER: u8 = 5;
-pub const REC_MINVER_STAGE2: u8 = 6;
+pub(crate) const REC_PIN: u8 = 1;
+pub(crate) const REC_MINVER: u8 = 2;
+pub(crate) const REC_HEADER: u8 = 3;
+pub(crate) const REC_QIO: u8 = 4;
+pub(crate) const REC_MINVER_LOADER: u8 = 5;
+pub(crate) const REC_MINVER_STAGE2: u8 = 6;
 /// One module slot: `slot u8` + `u32` minimum version.
-pub const REC_MINVER_MODULE: u8 = 7;
-pub const MODULE_SLOTS: usize = 8;
+pub(crate) const REC_MINVER_MODULE: u8 = 7;
+pub(crate) const MODULE_SLOTS: usize = 8;
 
 const MAGIC: u32 = 0x3153_4c57; // "WLS1"
 const ACTIVE: u32 = 0xa5a5_a5a5;
@@ -29,7 +30,7 @@ const SECTOR_HDR: u32 = 16;
 
 /// Access to the 8 KiB area; offsets are relative to its start. Writes are 4-byte aligned and only
 /// clear bits; `erase` takes a sector offset (0 or 4096).
-pub trait FlashOps {
+pub(crate) trait FlashOps {
     fn read(&mut self, off: u32, buf: &mut [u8]) -> bool;
     fn write(&mut self, off: u32, data: &[u8]) -> bool;
     fn erase(&mut self, sector_off: u32) -> bool;
@@ -37,25 +38,27 @@ pub trait FlashOps {
 
 /// The latest value of every record.
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
-pub struct View {
-    pub pin: Option<[u8; PUBKEY_SIZE]>,
-    pub minver: Option<u32>,
-    pub minver_loader: Option<u32>,
-    pub minver_stage2: Option<u32>,
-    pub minver_module: [Option<u32>; MODULE_SLOTS],
-    pub header: Option<[u8; HEADER_SIZE]>,
+pub(crate) struct View {
+    pub(crate) pin: Option<[u8; PUBKEY_SIZE]>,
+    pub(crate) minver: Option<u32>,
+    pub(crate) minver_loader: Option<u32>,
+    pub(crate) minver_stage2: Option<u32>,
+    pub(crate) minver_module: [Option<u32>; MODULE_SLOTS],
+    pub(crate) header: Option<[u8; HEADER_SIZE]>,
     /// 0 none, 1 QIO ok, 2 DIO only.
-    pub qio: u8,
+    pub(crate) qio: u8,
 }
 
 impl View {
     fn apply(&mut self, ty: u8, d: &[u8]) {
-        let u32_of = |d: &[u8]| (d.len() == 4).then(|| u32::from_le_bytes([d[0], d[1], d[2], d[3]]));
+        let u32_of =
+            |d: &[u8]| (d.len() == 4).then(|| u32::from_le_bytes([d[0], d[1], d[2], d[3]]));
         match ty {
             REC_PIN if d.len() == PUBKEY_SIZE => self.pin = Some(d.try_into().unwrap()),
             REC_MINVER => self.minver = u32_of(d).or(self.minver),
             REC_MINVER_MODULE if d.len() == 5 && (d[0] as usize) < MODULE_SLOTS => {
-                self.minver_module[d[0] as usize] = Some(u32::from_le_bytes([d[1], d[2], d[3], d[4]]));
+                self.minver_module[d[0] as usize] =
+                    Some(u32::from_le_bytes([d[1], d[2], d[3], d[4]]));
             }
             REC_HEADER if d.len() == HEADER_SIZE => self.header = Some(d.try_into().unwrap()),
             REC_QIO if d.len() == 1 => self.qio = d[0],
@@ -70,7 +73,11 @@ fn crc16(mut crc: u16, data: &[u8]) -> u16 {
     for &b in data {
         crc ^= (b as u16) << 8;
         for _ in 0..8 {
-            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 };
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x1021
+            } else {
+                crc << 1
+            };
         }
     }
     crc
@@ -85,13 +92,13 @@ fn padded(len: usize) -> usize {
     (len + 3) & !3
 }
 
-pub struct StateLog<F: FlashOps> {
+pub(crate) struct StateLog<F: FlashOps> {
     ops: F,
     active: Option<u8>,
     seq: u32,
     used: u32,
     dirty: bool,
-    pub view: View,
+    pub(crate) view: View,
 }
 
 struct Scan {
@@ -131,7 +138,10 @@ fn scan_sector<F: FlashOps>(ops: &mut F, idx: u8) -> Option<Scan> {
         let next = off + 4 + padded(len as usize) as u32;
         let mut data = [0u8; 255 + 3];
         let n = padded(len as usize);
-        if ty == 0 || next > SECTOR || !ops.read(base + off + 4, &mut data[..n]) || record_word(ty, len, &data[..len as usize]) != word
+        if ty == 0
+            || next > SECTOR
+            || !ops.read(base + off + 4, &mut data[..n])
+            || record_word(ty, len, &data[..len as usize]) != word
         {
             dirty = true;
             break;
@@ -139,7 +149,12 @@ fn scan_sector<F: FlashOps>(ops: &mut F, idx: u8) -> Option<Scan> {
         view.apply(ty, &data[..len as usize]);
         off = next;
     }
-    Some(Scan { seq, view, used: off, dirty })
+    Some(Scan {
+        seq,
+        view,
+        used: off,
+        dirty,
+    })
 }
 
 fn newer(a: u32, b: u32) -> bool {
@@ -148,7 +163,7 @@ fn newer(a: u32, b: u32) -> bool {
 
 impl<F: FlashOps> StateLog<F> {
     /// Scan both sectors; blank flash gives an empty log.
-    pub fn open(mut ops: F) -> Self {
+    pub(crate) fn open(mut ops: F) -> Self {
         let mut best: Option<(u8, Scan)> = None;
         for idx in 0..2u8 {
             if let Some(s) = scan_sector(&mut ops, idx) {
@@ -158,22 +173,38 @@ impl<F: FlashOps> StateLog<F> {
             }
         }
         match best {
-            Some((idx, s)) => StateLog { ops, active: Some(idx), seq: s.seq, used: s.used, dirty: s.dirty, view: s.view },
-            None => StateLog { ops, active: None, seq: 0, used: 0, dirty: false, view: View::default() },
+            Some((idx, s)) => StateLog {
+                ops,
+                active: Some(idx),
+                seq: s.seq,
+                used: s.used,
+                dirty: s.dirty,
+                view: s.view,
+            },
+            None => StateLog {
+                ops,
+                active: None,
+                seq: 0,
+                used: 0,
+                dirty: false,
+                view: View::default(),
+            },
         }
     }
 
-    pub fn ops(&mut self) -> &mut F {
+    pub(crate) fn ops(&mut self) -> &mut F {
         &mut self.ops
     }
 
     /// Whether a record with `payload` bytes still fits in the active sector (false: the next append compacts).
-    pub fn fits(&self, payload: usize) -> bool {
+    #[cfg(test)]
+    pub(crate) fn fits(&self, payload: usize) -> bool {
         self.active.is_some() && !self.dirty && self.used + 4 + padded(payload) as u32 <= SECTOR
     }
 
     /// Read both sectors back (a copy of the 8 KiB area), for tests and diagnostics.
-    pub fn flash_snapshot(&mut self) -> alloc::vec::Vec<u8> {
+    #[cfg(test)]
+    pub(crate) fn flash_snapshot(&mut self) -> alloc::vec::Vec<u8> {
         let mut v = alloc::vec![0u8; SIZE as usize];
         let _ = self.ops.read(0, &mut v);
         v
@@ -194,7 +225,11 @@ impl<F: FlashOps> StateLog<F> {
             Some(a) => 1 - a,
         };
         let base = to as u32 * SECTOR;
-        let seq = if self.active.is_none() { 1 } else { self.seq.wrapping_add(1) };
+        let seq = if self.active.is_none() {
+            1
+        } else {
+            self.seq.wrapping_add(1)
+        };
         if !self.ops.erase(base) {
             return false;
         }
@@ -218,7 +253,11 @@ impl<F: FlashOps> StateLog<F> {
                 return false;
             }
         }
-        for (ty, val) in [(REC_MINVER, v.minver), (REC_MINVER_LOADER, v.minver_loader), (REC_MINVER_STAGE2, v.minver_stage2)] {
+        for (ty, val) in [
+            (REC_MINVER, v.minver),
+            (REC_MINVER_LOADER, v.minver_loader),
+            (REC_MINVER_STAGE2, v.minver_stage2),
+        ] {
             if let Some(x) = val {
                 if !put(self, ty, &x.to_le_bytes(), &mut off) {
                     return false;
@@ -259,7 +298,7 @@ impl<F: FlashOps> StateLog<F> {
 
     /// Append one record (compacting into the other sector when needed). False on a flash failure;
     /// the in-memory view is then left as it was.
-    pub fn append(&mut self, ty: u8, data: &[u8]) -> bool {
+    pub(crate) fn append(&mut self, ty: u8, data: &[u8]) -> bool {
         if ty == 0 || data.len() > 255 {
             return false;
         }
@@ -285,28 +324,15 @@ impl<F: FlashOps> StateLog<F> {
         ok
     }
 
-    pub fn append_u32(&mut self, ty: u8, v: u32) -> bool {
+    pub(crate) fn append_u32(&mut self, ty: u8, v: u32) -> bool {
         self.append(ty, &v.to_le_bytes())
     }
 
     /// Record the minimum version of one module slot.
-    pub fn append_module_version(&mut self, slot: u8, v: u32) -> bool {
+    pub(crate) fn append_module_version(&mut self, slot: u8, v: u32) -> bool {
         let mut rec = [0u8; 5];
         rec[0] = slot;
         rec[1..].copy_from_slice(&v.to_le_bytes());
         self.append(REC_MINVER_MODULE, &rec)
-    }
-
-    /// Erase both sectors (an explicit ownership change).
-    pub fn erase_all(&mut self) -> bool {
-        if !(self.ops.erase(0) && self.ops.erase(SECTOR)) {
-            return false;
-        }
-        self.view = View::default();
-        self.active = None;
-        self.seq = 0;
-        self.used = 0;
-        self.dirty = false;
-        true
     }
 }
